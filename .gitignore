@@ -1,0 +1,40 @@
+# 编译输出
+build/
+*/build/
+*.o
+*.a
+*.so
+*.exe
+
+# CMake 生成文件
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!cmake/pcg_v5Config.cmake.in
+!CMakeLists.txt
+
+# IDE 文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 输出文件
+solution.txt
+*.out
+
+# 但保留示例数据矩阵文件
+!examples/matrix_*
+!examples/*.mtx
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 临时文件
+*.tmp
+*.log

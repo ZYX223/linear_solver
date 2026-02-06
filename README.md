@@ -1,6 +1,6 @@
-# PCG Solver v5 - CPU/GPU 统一预处理共轭梯度求解器
+# PCG Solver - CPU/GPU 预处理共轭梯度求解器
 
-基于 NVIDIA CUDA 实现的高性能预处理共轭梯度（PCG）求解器，支持 CPU 和 GPU 双后端。
+基于 NVIDIA CUDA Samples 实现的预处理共轭梯度（PCG）求解器，支持 CPU 和 GPU。
 
 ## 特性
 
@@ -29,7 +29,7 @@
 ## 项目结构
 
 ```
-pcg_v5/
+pcg_solver/
 ├── CMakeLists.txt          # 顶层 CMake 配置
 ├── README.md               # 本文件
 │
@@ -50,12 +50,6 @@ pcg_v5/
 │   ├── README.md           # 示例说明
 │   ├── matrix_poisson_P1_14401      # 测试矩阵
 │   └── matrix_poisson_P1rhs_14401   # 测试右端项
-│
-├── tests/                  # 单元测试（待实现）
-│   └── CMakeLists.txt
-│
-└── cmake/                  # CMake 模块
-    └── pcg_v5Config.cmake.in
 ```
 
 ## 依赖
@@ -87,13 +81,6 @@ cmake -DBUILD_TESTS=ON ..
 
 # Release 模式（优化）
 cmake -DCMAKE_BUILD_TYPE=Release ..
-```
-
-### 安装
-
-```bash
-sudo make install
-# 安装到 /usr/local/lib, /usr/local/bin, /usr/local/include
 ```
 
 ## 使用
@@ -200,7 +187,7 @@ std::cout << "Converged: " << (stats.converged ? "Yes" : "No") << std::endl;
 在其他项目的 CMakeLists.txt 中：
 
 ```cmake
-find_package(pcg_v5 REQUIRED)
+find_package(pcg_solver REQUIRED)
 
 target_link_libraries(your_target PRIVATE pcg_v5_lib)
 ```

@@ -87,13 +87,14 @@ void print_stats_line(const std::string& label, const SolveStats& stats) {
     std::cout << "  " << std::setw(25) << std::left << label
               << " | " << std::setw(6) << stats.iterations
               << " | " << std::scientific << std::setw(10) << stats.final_residual
+              << " | " << std::fixed << std::setw(10) << std::setprecision(4) << stats.solve_time
               << " | " << std::setw(10) << (stats.converged ? "Yes" : "No")
               << " |\n";
 }
 
 // 打印表格分隔线
 void print_separator() {
-    std::cout << "  " << std::string(63, '-') << "\n";
+    std::cout << "  " << std::string(85, '-') << "\n";
 }
 
 // 打印表格头
@@ -102,6 +103,7 @@ void print_table_header() {
     std::cout << "  " << std::setw(25) << std::left << "Method"
               << " | " << std::setw(6) << "Iters"
               << " | " << std::setw(10) << "Residual"
+              << " | " << std::setw(10) << "Time (s)"
               << " | " << std::setw(10) << "Converged"
               << " |\n";
     print_separator();
@@ -118,12 +120,6 @@ void run_test(const std::string& name, Backend backend, bool use_ilu,
 
     std::vector<float> x(n, 0.0f);
     PCGSolver solver(config);
-
-    if (backend == BACKEND_GPU && use_ilu) {
-        auto sparse = std::make_shared<CUSparseWrapper>();
-        auto ilu_prec = std::make_shared<ILUPreconditioner>(sparse);
-        solver.set_preconditioner(ilu_prec);
-    }
 
     SolveStats stats = solver.solve(A, b, x);
     print_stats_line(name, stats);

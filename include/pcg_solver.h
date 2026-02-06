@@ -14,6 +14,7 @@ struct SolveStats {
     int iterations;
     float final_residual;
     bool converged;
+    float solve_time;  // 求解时间（秒）
 };
 
 // ============================================================================
@@ -34,47 +35,6 @@ struct PCGConfig {
     float tolerance = 1e-12f;
     bool use_preconditioner = false;  // 默认关闭预处理
     Backend backend = BACKEND_GPU;    // 默认使用 GPU
-};
-
-// ============================================================================
-// CPU 向量运算（辅助函数）- 声明
-// ============================================================================
-
-namespace CPUOps {
-    float dot(const std::vector<float>& x, const std::vector<float>& y);
-    void axpy(float alpha, const std::vector<float>& x, std::vector<float>& y);
-    void scal(float alpha, std::vector<float>& x);
-    void copy(const std::vector<float>& x, std::vector<float>& y);
-    void spmv(int n, const std::vector<int>& row_ptr,
-              const std::vector<int>& col_ind,
-              const std::vector<float>& values,
-              const std::vector<float>& x,
-              std::vector<float>& y);
-}
-
-// ============================================================================
-// CPU ILU(0) 预处理器
-// ============================================================================
-
-class CPUIILUPreconditioner {
-public:
-    CPUIILUPreconditioner();
-    ~CPUIILUPreconditioner();
-
-    void setup(int n, const std::vector<int>& row_ptr,
-              const std::vector<int>& col_ind,
-              const std::vector<float>& values);
-
-    void apply(const std::vector<float>& r, std::vector<float>& z) const;
-
-private:
-    int n_;
-    std::vector<int> row_ptr_;
-    std::vector<int> col_ind_;
-    std::vector<float> values_;  // ILU(0) 分解后的值
-
-    void forward_substitute(const std::vector<float>& b, std::vector<float>& y) const;
-    void backward_substitute(const std::vector<float>& y, std::vector<float>& x) const;
 };
 
 // ============================================================================

@@ -195,3 +195,46 @@ cusparseDnVecDescr_t GPUVector::create_dnvec_descr() const {
     CHECK_CUSPARSE(cusparseCreateDnVec(&vec, n, d_data, CUDA_R_32F));
     return vec;
 }
+
+// ============================================================================
+// CPUOps 实现（CPU 向量运算）
+// ============================================================================
+
+namespace CPUOps {
+    float dot(const std::vector<float>& x, const std::vector<float>& y) {
+        float result = 0.0f;
+        for (size_t i = 0; i < x.size(); i++) {
+            result += x[i] * y[i];
+        }
+        return result;
+    }
+
+    void axpy(float alpha, const std::vector<float>& x, std::vector<float>& y) {
+        for (size_t i = 0; i < x.size(); i++) {
+            y[i] += alpha * x[i];
+        }
+    }
+
+    void scal(float alpha, std::vector<float>& x) {
+        for (size_t i = 0; i < x.size(); i++) {
+            x[i] *= alpha;
+        }
+    }
+
+    void copy(const std::vector<float>& x, std::vector<float>& y) {
+        y = x;
+    }
+
+    void spmv(int n, const std::vector<int>& row_ptr,
+              const std::vector<int>& col_ind,
+              const std::vector<float>& values,
+              const std::vector<float>& x,
+              std::vector<float>& y) {
+        std::fill(y.begin(), y.end(), 0.0f);
+        for (int i = 0; i < n; i++) {
+            for (int j = row_ptr[i]; j < row_ptr[i + 1]; j++) {
+                y[i] += values[j] * x[col_ind[j]];
+            }
+        }
+    }
+}

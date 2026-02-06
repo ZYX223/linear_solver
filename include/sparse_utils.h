@@ -145,4 +145,20 @@ public:
     cusparseDnVecDescr_t create_dnvec_descr() const;
 };
 
+// ============================================================================
+// CPU 向量运算（辅助函数）
+// ============================================================================
+
+namespace CPUOps {
+    float dot(const std::vector<float>& x, const std::vector<float>& y);
+    void axpy(float alpha, const std::vector<float>& x, std::vector<float>& y);
+    void scal(float alpha, std::vector<float>& x);
+    void copy(const std::vector<float>& x, std::vector<float>& y);
+    void spmv(int n, const std::vector<int>& row_ptr,
+              const std::vector<int>& col_ind,
+              const std::vector<float>& values,
+              const std::vector<float>& x,
+              std::vector<float>& y);
+}
+
 #endif // SPARSE_UTILS_H

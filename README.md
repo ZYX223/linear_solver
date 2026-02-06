@@ -65,6 +65,7 @@ pcg_solver/
 ### 基本编译
 
 ```bash
+cd examples
 mkdir build && cd build
 cmake ..
 make -j$(nproc)
@@ -114,12 +115,12 @@ cd examples
 
 [3/3] 运行测试...
   -----------------------------------------------------------------------------------
-  Method                    | Iters  | Residual   | Converged |
+  Method                    | Iters  | Residual   | Time (s)   | Converged  |
   -----------------------------------------------------------------------------------
-  CPU (无预处理)        | 426    | 9.786829e-07 | Yes       |
-  CPU + ILU(0)              | 130    | 9.266e-07  | Yes       |
-  GPU (无预处理)        | 397    | 9.897e-07  | Yes       |
-  GPU + ILU(0)              | 129    | 9.333e-07  | Yes       |
+  CPU (无预处理)              | 426    | 9.786829e-07 | 0.8524     | Yes       |
+  CPU + ILU(0)               | 130    | 9.265991e-07 | 0.4271     | Yes       |
+  GPU (无预处理)              | 397    | 9.8967e-07   | 0.0590     | Yes       |
+  GPU + ILU(0)               | 129    | 9.332728e-07 | 0.0259     | Yes       |
   -----------------------------------------------------------------------------------
 ```
 
@@ -155,15 +156,8 @@ config.tolerance = 1e-6f;
 config.use_preconditioner = true;
 config.backend = BACKEND_GPU;  // 或 BACKEND_CPU
 
-// 创建求解器
+// 创建求解器（预处理器会自动创建）
 PCGSolver solver(config);
-
-// 设置 ILU(0) 预处理器（仅 GPU）
-if (config.backend == BACKEND_GPU) {
-    auto sparse = std::make_shared<CUSparseWrapper>();
-    auto ilu_prec = std::make_shared<ILUPreconditioner>(sparse);
-    solver.set_preconditioner(ilu_prec);
-}
 
 // 准备矩阵和右端项
 SparseMatrix A(rows, cols, nnz);
@@ -222,16 +216,16 @@ target_link_libraries(your_target PRIVATE pcg_v5_lib)
 ```
 ┌─────────────────────────────────────┐
 │         应用层 (Application)         │
-│  - examples/main.cpp                 │
+│  - examples/main.cpp                │
 └─────────────────────────────────────┘
                   ↓
 ┌─────────────────────────────────────┐
 │       求解器层 (Solver Layer)        │
-│  - PCGSolver (CPU/GPU 统一接口)     │
+│  - PCGSolver (CPU/GPU 统一接口)      │
 │  - Preconditioner (接口)             │
-│    - ILUPreconditioner (GPU ILU0)   │
+│    - GPUILUPreconditioner (GPU)     │
 │    - NonePreconditioner             │
-│    - CPUIILUPreconditioner (CPU)    │
+│    - CPUILUPreconditioner (CPU)     │
 └─────────────────────────────────────┘
                   ↓
 ┌─────────────────────────────────────┐

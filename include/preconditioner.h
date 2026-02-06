@@ -4,8 +4,11 @@
 #include "sparse_utils.h"
 #include <cusparse.h>
 #include <memory>
+#include <vector>
 
-// 预处理器抽象接口
+// ============================================================================
+// 预处理器抽象接口（GPU）
+// ============================================================================
 class Preconditioner {
 public:
     virtual ~Preconditioner() = default;
@@ -17,18 +20,18 @@ public:
     virtual void apply(const GPUVector& r, GPUVector& z) = 0;
 };
 
-// 无预处理
+// 无预处理（GPU）
 class NonePreconditioner : public Preconditioner {
 public:
     void setup(const SparseMatrix& A) override;
     void apply(const GPUVector& r, GPUVector& z) override;
 };
 
-// ILU(0)预处理器
-class ILUPreconditioner : public Preconditioner {
+// ILU(0)预处理器（GPU）
+class GPUILUPreconditioner : public Preconditioner {
 public:
-    ILUPreconditioner(std::shared_ptr<CUSparseWrapper> sparse);
-    ~ILUPreconditioner();
+    GPUILUPreconditioner(std::shared_ptr<CUSparseWrapper> sparse);
+    ~GPUILUPreconditioner();
 
     void setup(const SparseMatrix& A) override;
     void apply(const GPUVector& r, GPUVector& z) override;
@@ -65,6 +68,31 @@ private:
     float* d_y_;
 
     bool is_setup_;
+};
+
+// ============================================================================
+// CPU ILU(0) 预处理器
+// ============================================================================
+
+class CPUIILUPreconditioner {
+public:
+    CPUIILUPreconditioner();
+    ~CPUIILUPreconditioner();
+
+    void setup(int n, const std::vector<int>& row_ptr,
+              const std::vector<int>& col_ind,
+              const std::vector<float>& values);
+
+    void apply(const std::vector<float>& r, std::vector<float>& z) const;
+
+private:
+    int n_;
+    std::vector<int> row_ptr_;
+    std::vector<int> col_ind_;
+    std::vector<float> values_;  // ILU(0) 分解后的值
+
+    void forward_substitute(const std::vector<float>& b, std::vector<float>& y) const;
+    void backward_substitute(const std::vector<float>& y, std::vector<float>& x) const;
 };
 
 #endif // PRECONDITIONER_H

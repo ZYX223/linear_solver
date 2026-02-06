@@ -1,144 +1,8 @@
 #include "pcg_solver.h"
+#include "preconditioner.h"
 #include <algorithm>
 #include <iostream>
-
-// ============================================================================
-// CPUOps 实现
-// ============================================================================
-
-namespace CPUOps {
-    float dot(const std::vector<float>& x, const std::vector<float>& y) {
-        float result = 0.0f;
-        for (size_t i = 0; i < x.size(); i++) {
-            result += x[i] * y[i];
-        }
-        return result;
-    }
-
-    void axpy(float alpha, const std::vector<float>& x, std::vector<float>& y) {
-        for (size_t i = 0; i < x.size(); i++) {
-            y[i] += alpha * x[i];
-        }
-    }
-
-    void scal(float alpha, std::vector<float>& x) {
-        for (size_t i = 0; i < x.size(); i++) {
-            x[i] *= alpha;
-        }
-    }
-
-    void copy(const std::vector<float>& x, std::vector<float>& y) {
-        y = x;
-    }
-
-    void spmv(int n, const std::vector<int>& row_ptr,
-              const std::vector<int>& col_ind,
-              const std::vector<float>& values,
-              const std::vector<float>& x,
-              std::vector<float>& y) {
-        std::fill(y.begin(), y.end(), 0.0f);
-        for (int i = 0; i < n; i++) {
-            for (int j = row_ptr[i]; j < row_ptr[i + 1]; j++) {
-                y[i] += values[j] * x[col_ind[j]];
-            }
-        }
-    }
-}
-
-// ============================================================================
-// CPUIILUPreconditioner 实现
-// ============================================================================
-
-CPUIILUPreconditioner::CPUIILUPreconditioner() : n_(0) {}
-
-CPUIILUPreconditioner::~CPUIILUPreconditioner() {}
-
-void CPUIILUPreconditioner::setup(int n, const std::vector<int>& row_ptr,
-                                  const std::vector<int>& col_ind,
-                                  const std::vector<float>& values) {
-    n_ = n;
-    row_ptr_ = row_ptr;
-    col_ind_ = col_ind;
-    values_ = values;
-
-    // ILU(0) 分解（基于 IKJ 版本的 Gaussian 消去法）
-    for (int i = 0; i < n_; i++) {
-        for (int k_idx = row_ptr_[i]; k_idx < row_ptr_[i + 1]; k_idx++) {
-            int k = col_ind_[k_idx];
-
-            if (k >= i) break;
-
-            float a_ik = values_[k_idx];
-
-            float a_kk = 0.0f;
-            for (int p = row_ptr_[k]; p < row_ptr_[k + 1]; p++) {
-                if (col_ind_[p] == k) {
-                    a_kk = values_[p];
-                    break;
-                }
-            }
-
-            if (a_kk != 0.0f) {
-                a_ik /= a_kk;
-                values_[k_idx] = a_ik;
-
-                for (int j_idx = k_idx + 1; j_idx < row_ptr_[i + 1]; j_idx++) {
-                    int j = col_ind_[j_idx];
-                    if (j <= k) continue;
-
-                    float a_kj = 0.0f;
-                    for (int p = row_ptr_[k]; p < row_ptr_[k + 1]; p++) {
-                        if (col_ind_[p] == j) {
-                            a_kj = values_[p];
-                            break;
-                        }
-                    }
-
-                    if (a_kj != 0.0f) {
-                        values_[j_idx] -= a_ik * a_kj;
-                    }
-                }
-            }
-        }
-    }
-}
-
-void CPUIILUPreconditioner::apply(const std::vector<float>& r, std::vector<float>& z) const {
-    std::vector<float> y(n_);
-    forward_substitute(r, y);
-    backward_substitute(y, z);
-}
-
-void CPUIILUPreconditioner::forward_substitute(const std::vector<float>& b, std::vector<float>& y) const {
-    for (int i = 0; i < n_; i++) {
-        float sum = b[i];
-        for (int j = row_ptr_[i]; j < row_ptr_[i + 1]; j++) {
-            int col = col_ind_[j];
-            if (col < i) {
-                sum -= values_[j] * y[col];
-            }
-        }
-        y[i] = sum;
-    }
-}
-
-void CPUIILUPreconditioner::backward_substitute(const std::vector<float>& y, std::vector<float>& x) const {
-    for (int i = n_ - 1; i >= 0; i--) {
-        float sum = y[i];
-        float diag = 1.0f;
-
-        for (int j = row_ptr_[i]; j < row_ptr_[i + 1]; j++) {
-            int col = col_ind_[j];
-            if (col > i) {
-                sum -= values_[j] * x[col];
-            } else if (col == i) {
-                diag = values_[j];
-            }
-        }
-
-        x[i] = sum / diag;
-    }
-}
+#include <chrono>
 
 // ============================================================================
 // PCGSolver 实现
@@ -155,10 +19,6 @@ PCGSolver::PCGSolver(const PCGConfig& config)
     if (backend_ == BACKEND_GPU) {
         blas_ = std::make_shared<CUBLASWrapper>();
         sparse_ = std::make_shared<CUSparseWrapper>();
-
-        if (!config_.use_preconditioner) {
-            preconditioner_ = std::make_shared<NonePreconditioner>();
-        }
     }
 }
 
@@ -229,6 +89,11 @@ SolveStats PCGSolver::solve_gpu(const SparseMatrix& A,
                                            &buffer_spMV_size_));
     CHECK_CUDA(cudaMalloc(&d_buffer_spMV_, buffer_spMV_size_));
 
+    // 延迟初始化预处理器（如果需要）
+    if (config_.use_preconditioner && !preconditioner_) {
+        preconditioner_ = std::make_shared<GPUILUPreconditioner>(sparse_);
+    }
+
     if (preconditioner_) {
         preconditioner_->setup(A);
     }
@@ -243,9 +108,14 @@ SolveStats PCGSolver::solve_gpu(const SparseMatrix& A,
     const float tol = config_.tolerance;
     const int max_iter = config_.max_iterations;
 
+    auto start = std::chrono::high_resolution_clock::now();
+
     while (r1 > tol * tol && k < max_iter) {
         if (preconditioner_) {
             preconditioner_->apply(*d_r_, *d_z_);
+        } else {
+            // 无预处理：z = r
+            blas_->copy(n, d_r_->d_data, d_z_->d_data);
         }
 
         k++;
@@ -278,6 +148,9 @@ SolveStats PCGSolver::solve_gpu(const SparseMatrix& A,
         r1 = blas_->dot(n, d_r_->d_data, d_r_->d_data);
     }
 
+    auto end = std::chrono::high_resolution_clock::now();
+    float solve_time = std::chrono::duration<float>(end - start).count();
+
     d_x.download_to_host(x.data());
 
     CHECK_CUSPARSE(cusparseDestroySpMat(matA));
@@ -290,6 +163,7 @@ SolveStats PCGSolver::solve_gpu(const SparseMatrix& A,
     stats.iterations = k;
     stats.final_residual = sqrt(r1);
     stats.converged = (k <= max_iter);
+    stats.solve_time = solve_time;
 
     return stats;
 }
@@ -315,11 +189,13 @@ SolveStats PCGSolver::solve_cpu(const SparseMatrix& A,
 
     if (config_.use_preconditioner) {
         cpu_ilu_prec_ = std::make_shared<CPUIILUPreconditioner>();
-        cpu_ilu_prec_->setup(n, A.row_ptr, A.col_ind, A.values);
+        cpu_ilu_prec_->setup(A.rows, A.row_ptr, A.col_ind, A.values);
     }
 
     r = b;
     float r1 = CPUOps::dot(r, r);
+
+    auto start = std::chrono::high_resolution_clock::now();
 
     while (r1 > tol * tol && k < max_iter) {
         if (config_.use_preconditioner && cpu_ilu_prec_) {
@@ -357,10 +233,14 @@ SolveStats PCGSolver::solve_cpu(const SparseMatrix& A,
         r1 = CPUOps::dot(r, r);
     }
 
+    auto end = std::chrono::high_resolution_clock::now();
+    float solve_time = std::chrono::duration<float>(end - start).count();
+
     SolveStats stats;
     stats.iterations = k;
     stats.final_residual = sqrt(r1);
     stats.converged = (k <= max_iter);
+    stats.solve_time = solve_time;
 
     return stats;
 }

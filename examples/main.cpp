@@ -4,6 +4,8 @@
 #include <iomanip>
 #include <fstream>
 #include <vector>
+#include <algorithm>
+#include <string>
 
 // ============================================================================
 // 工具函数
@@ -109,9 +111,30 @@ void print_table_header() {
     print_separator();
 }
 
+// 保存解向量到文件
+void save_solution(const std::string& filename, const std::vector<float>& x) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "  警告: 无法创建解向量文件: " << filename << std::endl;
+        return;
+    }
+
+    // 写入向量大小
+    file << x.size() << "\n";
+
+    // 写入解向量值
+    for (size_t i = 0; i < x.size(); i++) {
+        file << x[i] << "\n";
+    }
+
+    file.close();
+    std::cout << "  解向量已保存到: " << filename << std::endl;
+}
+
 // 运行测试
 void run_test(const std::string& name, Backend backend, bool use_ilu,
-              const SparseMatrix& A, const std::vector<float>& b, int n) {
+              const SparseMatrix& A, const std::vector<float>& b, int n,
+              const std::string& output_prefix = "") {
     PCGConfig config;
     config.max_iterations = 1000;
     config.tolerance = 1e-6f;
@@ -123,6 +146,16 @@ void run_test(const std::string& name, Backend backend, bool use_ilu,
 
     SolveStats stats = solver.solve(A, b, x);
     print_stats_line(name, stats);
+
+    // 保存解向量
+    if (!output_prefix.empty()) {
+        std::string filename = output_prefix + "_" + name + ".txt";
+        // 替换空格和括号，使文件名更友好
+        std::replace(filename.begin(), filename.end(), ' ', '_');
+        filename.erase(std::remove(filename.begin(), filename.end(), '('), filename.end());
+        filename.erase(std::remove(filename.begin(), filename.end(), ')'), filename.end());
+        save_solution(filename, x);
+    }
 }
 
 // ============================================================================
@@ -154,10 +187,14 @@ int main(int argc, char** argv) {
 
     std::cout << "\n[3/3] 运行测试...\n";
     print_table_header();
-    run_test("CPU (无预处理)", BACKEND_CPU, false, *A, b, n);
-    run_test("CPU + ILU(0)", BACKEND_CPU, true, *A, b, n);
-    run_test("GPU (无预处理)", BACKEND_GPU, false, *A, b, n);
-    run_test("GPU + ILU(0)", BACKEND_GPU, true, *A, b, n);
+
+    // 生成输出文件前缀（基于矩阵文件名）
+    std::string output_prefix = matrix_file;
+
+    run_test("CPU (无预处理)", BACKEND_CPU, false, *A, b, n, output_prefix);
+    run_test("CPU + ILU(0)", BACKEND_CPU, true, *A, b, n, output_prefix);
+    run_test("GPU (无预处理)", BACKEND_GPU, false, *A, b, n, output_prefix);
+    run_test("GPU + ILU(0)", BACKEND_GPU, true, *A, b, n, output_prefix);
 
     print_separator();
 

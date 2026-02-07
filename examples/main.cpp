@@ -1,5 +1,6 @@
 #include "../include/pcg_solver.h"
 #include "../include/preconditioner.h"
+#include "../include/precision_traits.h"
 #include <iostream>
 #include <iomanip>
 #include <fstream>
@@ -8,11 +9,11 @@
 #include <string>
 
 // ============================================================================
-// 工具函数
+// 模板化的工具函数
 // ============================================================================
 
-// 读取矩阵文件（格式：行 列 值，第一行是：行数 列数 非零元数）
-SparseMatrix* read_matrix_file(const std::string& filename) {
+template<Precision P>
+SparseMatrix<P>* read_matrix_file(const std::string& filename) {
     std::ifstream file(filename);
     if (!file.is_open()) {
         std::cerr << "错误: 无法打开矩阵文件: " << filename << std::endl;
@@ -24,19 +25,19 @@ SparseMatrix* read_matrix_file(const std::string& filename) {
 
     std::cout << "  矩阵信息: " << rows << " x " << cols << ", nnz = " << nnz << std::endl;
 
-    SparseMatrix* A = new SparseMatrix(rows, cols, nnz);
+    SparseMatrix<P>* A = new SparseMatrix<P>(rows, cols, nnz);
 
-    // 读取矩阵数据（三元组格式）
-    std::vector<std::tuple<int, int, float>> triples;
+    using Scalar = typename SparseMatrix<P>::Scalar;
+
+    std::vector<std::tuple<int, int, Scalar>> triples;
     for (int i = 0; i < nnz; i++) {
         int row, col;
-        float val;
+        Scalar val;
         file >> row >> col >> val;
         triples.push_back(std::make_tuple(row, col, val));
     }
     file.close();
 
-    // 转换为 CSR 格式
     std::vector<int> row_count(rows, 0);
     for (const auto& t : triples) {
         row_count[std::get<0>(t)]++;
@@ -47,12 +48,11 @@ SparseMatrix* read_matrix_file(const std::string& filename) {
         A->row_ptr[i + 1] = A->row_ptr[i] + row_count[i];
     }
 
-    // 填充 col_ind 和 values
     std::vector<int> current_row(rows, 0);
     for (const auto& t : triples) {
         int row = std::get<0>(t);
         int col = std::get<1>(t);
-        float val = std::get<2>(t);
+        Scalar val = std::get<2>(t);
 
         int idx = A->row_ptr[row] + current_row[row];
         A->col_ind[idx] = col;
@@ -64,8 +64,8 @@ SparseMatrix* read_matrix_file(const std::string& filename) {
     return A;
 }
 
-// 读取右端项文件（第一行是向量大小，后面是值）
-std::vector<float> read_rhs_file(const std::string& filename, int& n) {
+template<Precision P>
+std::vector<typename ScalarType<P>::type> read_rhs_file(const std::string& filename, int& n) {
     std::ifstream file(filename);
     if (!file.is_open()) {
         std::cerr << "错误: 无法打开右端项文件: " << filename << std::endl;
@@ -75,7 +75,8 @@ std::vector<float> read_rhs_file(const std::string& filename, int& n) {
     file >> n;
     std::cout << "  右端项大小: " << n << std::endl;
 
-    std::vector<float> b(n);
+    using Scalar = typename ScalarType<P>::type;
+    std::vector<Scalar> b(n);
     for (int i = 0; i < n; i++) {
         file >> b[i];
     }
@@ -111,18 +112,16 @@ void print_table_header() {
     print_separator();
 }
 
-// 保存解向量到文件
-void save_solution(const std::string& filename, const std::vector<float>& x) {
+template<Precision P>
+void save_solution(const std::string& filename, const std::vector<typename ScalarType<P>::type>& x) {
     std::ofstream file(filename);
     if (!file.is_open()) {
         std::cerr << "  警告: 无法创建解向量文件: " << filename << std::endl;
         return;
     }
 
-    // 写入向量大小
     file << x.size() << "\n";
 
-    // 写入解向量值
     for (size_t i = 0; i < x.size(); i++) {
         file << x[i] << "\n";
     }
@@ -130,25 +129,35 @@ void save_solution(const std::string& filename, const std::vector<float>& x) {
     file.close();
 }
 
-// 运行测试
+template<Precision P>
 void run_test(const std::string& name, Backend backend, bool use_ilu,
-              const SparseMatrix& A, const std::vector<float>& b, int n) {
+              const SparseMatrix<P>& A, const std::vector<typename ScalarType<P>::type>& b, int n,
+              bool save_sol = false) {
     PCGConfig config;
     config.max_iterations = 1000;
-    config.tolerance = 1e-6f;
+    config.tolerance = 1e-6;
     config.use_preconditioner = use_ilu;
     config.backend = backend;
 
-    std::vector<float> x(n, 0.0f);
-    PCGSolver solver(config);
+    using Scalar = typename ScalarType<P>::type;
+    std::vector<Scalar> x(n, ScalarConstants<P>::zero());
 
+    PCGSolver<P> solver(config);
     SolveStats stats = solver.solve(A, b, x);
     print_stats_line(name, stats);
 
-    // 仅保存 GPU ILU0 版本的解向量
-    if (name == "GPU + ILU(0)") {
-        save_solution("solution_gpu_ilu0.txt", x);
+    if (save_sol) {
+        std::string filename = "solution_gpu_ilu0_" + std::string(P == Precision::Float32 ? "float" : "double") + ".txt";
+        save_solution<P>(filename, x);
     }
+}
+
+template<Precision P>
+void run_all_tests(const SparseMatrix<P>& A, const std::vector<typename ScalarType<P>::type>& b, int n) {
+    run_test<P>("CPU (无预处理)", BACKEND_CPU, false, A, b, n);
+    run_test<P>("CPU + ILU(0)", BACKEND_CPU, true, A, b, n);
+    run_test<P>("GPU (无预处理)", BACKEND_GPU, false, A, b, n);
+    run_test<P>("GPU + ILU(0)", BACKEND_GPU, true, A, b, n, true);
 }
 
 // ============================================================================
@@ -156,40 +165,56 @@ void run_test(const std::string& name, Backend backend, bool use_ilu,
 // ============================================================================
 
 int main(int argc, char** argv) {
-    if (argc != 3) {
-        std::cerr << "用法: " << argv[0] << " <矩阵文件> <右端项文件>" << std::endl;
-        std::cerr << "示例: " << argv[0] << " matrix_poisson_P1_14401 matrix_poisson_P1rhs_14401" << std::endl;
+    if (argc < 3) {
+        std::cerr << "用法: " << argv[0] << " <矩阵文件> <右端项文件> [精度]\n";
+        std::cerr << "精度选项: float, double (默认: float)\n";
+        std::cerr << "示例: " << argv[0] << " matrix_poisson_P1_14401 matrix_poisson_P1rhs_14401 float\n";
         return 1;
     }
 
     std::string matrix_file = argv[1];
     std::string rhs_file = argv[2];
+    std::string precision_str = (argc > 3) ? argv[3] : "float";
+
+    Precision prec;
+    if (precision_str == "double") {
+        prec = Precision::Float64;
+        std::cout << "使用双精度 (double)\n";
+    } else {
+        prec = Precision::Float32;
+        std::cout << "使用单精度 (float)\n";
+    }
 
     std::cout << "\n";
     std::cout << "========================================\n";
     std::cout << "  PCG 求解器综合测试\n";
     std::cout << "========================================\n\n";
 
-    // 读取矩阵和右端项
     std::cout << "[1/3] 读取矩阵文件: " << matrix_file << "\n";
-    SparseMatrix* A = read_matrix_file(matrix_file);
-
-    std::cout << "\n[2/3] 读取右端项文件: " << rhs_file << "\n";
-    int n;
-    std::vector<float> b = read_rhs_file(rhs_file, n);
-
-    std::cout << "\n[3/3] 运行测试...\n";
+    std::cout << "[2/3] 读取右端项文件: " << rhs_file << "\n";
+    std::cout << "[3/3] 运行测试...\n";
     print_table_header();
 
-    run_test("CPU (无预处理)", BACKEND_CPU, false, *A, b, n);
-    run_test("CPU + ILU(0)", BACKEND_CPU, true, *A, b, n);
-    run_test("GPU (无预处理)", BACKEND_GPU, false, *A, b, n);
-    run_test("GPU + ILU(0)", BACKEND_GPU, true, *A, b, n);
+    // 根据精度分发到不同的实现
+    if (prec == Precision::Float32) {
+        SparseMatrix<Precision::Float32>* A = read_matrix_file<Precision::Float32>(matrix_file);
+        int n;
+        std::vector<float> b = read_rhs_file<Precision::Float32>(rhs_file, n);
+
+        run_all_tests<Precision::Float32>(*A, b, n);
+
+        delete A;
+    } else {
+        SparseMatrix<Precision::Float64>* A = read_matrix_file<Precision::Float64>(matrix_file);
+        int n;
+        std::vector<double> b = read_rhs_file<Precision::Float64>(rhs_file, n);
+
+        run_all_tests<Precision::Float64>(*A, b, n);
+
+        delete A;
+    }
 
     print_separator();
-
-    // 清理
-    delete A;
 
     return 0;
 }

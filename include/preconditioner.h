@@ -2,6 +2,7 @@
 #define PRECONDITIONER_H
 
 #include "sparse_utils.h"
+#include "precision_traits.h"
 #include <cusparse.h>
 #include <memory>
 #include <vector>
@@ -9,13 +10,14 @@
 // ============================================================================
 // 预处理器模板基类（统一 CPU/GPU 接口）
 // ============================================================================
-template<typename VectorType>
+template<Precision P, typename VectorType>
 class PreconditionerBase {
 public:
+    using Scalar = PRECISION_SCALAR(P);
     virtual ~PreconditionerBase() = default;
 
     // 初始化预处理器（如ILU分解）
-    virtual void setup(const SparseMatrix& A) = 0;
+    virtual void setup(const SparseMatrix<P>& A) = 0;
 
     // 应用预处理器: z = M^(-1) * r
     virtual void apply(const VectorType& r, VectorType& z) const = 0;
@@ -25,22 +27,27 @@ public:
 // GPU 预处理器
 // ============================================================================
 
-// ILU(0)预处理器（GPU）
-class GPUILUPreconditioner : public PreconditionerBase<GPUVector> {
+// ILU(0)预处理器（GPU，模板化）
+template<Precision P>
+class GPUILUPreconditioner : public PreconditionerBase<P, GPUVector<P>> {
 public:
-    GPUILUPreconditioner(std::shared_ptr<CUSparseWrapper> sparse);
+    using Scalar = PRECISION_SCALAR(P);
+    using Matrix = SparseMatrix<P>;
+    using Vector = GPUVector<P>;
+
+    GPUILUPreconditioner(std::shared_ptr<CUSparseWrapper<P>> sparse);
     ~GPUILUPreconditioner();
 
-    void setup(const SparseMatrix& A) override;
-    void apply(const GPUVector& r, GPUVector& z) const override;
+    void setup(const Matrix& A) override;
+    void apply(const Vector& r, Vector& z) const override;
 
 private:
-    std::shared_ptr<CUSparseWrapper> sparse_;
+    std::shared_ptr<CUSparseWrapper<P>> sparse_;
 
     int rows_, nnz_;
 
     // ILU(0)分解的L和U因子（存储在同一个数组中）
-    float* d_valsILU0_;
+    Scalar* d_valsILU0_;
 
     // 矩阵描述符
     cusparseMatDescr_t matLU_descr_;
@@ -63,7 +70,7 @@ private:
     size_t bufferSizeU_;
 
     // 辅助向量（用于L和U之间的中间结果）
-    float* d_y_;
+    Scalar* d_y_;
 
     bool is_setup_;
 };
@@ -72,28 +79,33 @@ private:
 // CPU ILU(0) 预处理器
 // ============================================================================
 
-class CPUILUPreconditioner : public PreconditionerBase<std::vector<float>> {
+template<Precision P>
+class CPUILUPreconditioner : public PreconditionerBase<P, std::vector<PRECISION_SCALAR(P)>> {
 public:
+    using Scalar = PRECISION_SCALAR(P);
+    using Matrix = SparseMatrix<P>;
+    using Vector = std::vector<Scalar>;
+
     CPUILUPreconditioner();
     ~CPUILUPreconditioner() override;
 
     // 实现基类接口
-    void setup(const SparseMatrix& A) override;
-    void apply(const std::vector<float>& r, std::vector<float>& z) const override;
+    void setup(const Matrix& A) override;
+    void apply(const Vector& r, Vector& z) const override;
 
     // 重载版本（保持向后兼容）
     void setup(int n, const std::vector<int>& row_ptr,
               const std::vector<int>& col_ind,
-              const std::vector<float>& values);
+              const std::vector<Scalar>& values);
 
 private:
     int n_;
     std::vector<int> row_ptr_;
     std::vector<int> col_ind_;
-    std::vector<float> values_;  // ILU(0) 分解后的值
+    std::vector<Scalar> values_;  // ILU(0) 分解后的值
 
-    void forward_substitute(const std::vector<float>& b, std::vector<float>& y) const;
-    void backward_substitute(const std::vector<float>& y, std::vector<float>& x) const;
+    void forward_substitute(const Vector& b, Vector& y) const;
+    void backward_substitute(const Vector& y, Vector& x) const;
 };
 
 #endif // PRECONDITIONER_H

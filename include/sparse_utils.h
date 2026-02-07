@@ -1,15 +1,13 @@
 #ifndef SPARSE_UTILS_H
 #define SPARSE_UTILS_H
 
+#include "precision_traits.h"
 #include <cuda_runtime.h>
 #include <cusparse.h>
 #include <cublas_v2.h>
 #include <vector>
 #include <memory>
-
-// 常量声明
-extern const float floatone;
-extern const float floatzero;
+#include <type_traits>
 
 #define CHECK_CUDA(val) do { \
     cudaError_t err = (val); \
@@ -35,33 +33,40 @@ extern const float floatzero;
     } \
 } while(0)
 
-// cuBLAS封装
+// cuBLAS封装（模板化）
+template<Precision P>
 class CUBLASWrapper {
 public:
+    using Scalar = PRECISION_SCALAR(P);
+
     CUBLASWrapper();
     ~CUBLASWrapper();
 
     cublasHandle_t handle() const { return handle_; }
 
     // 向量点积: return x^T * y
-    float dot(int n, const float* x, const float* y);
+    Scalar dot(int n, const Scalar* x, const Scalar* y);
 
     // 向量更新: y = alpha * x + y
-    void axpy(int n, float alpha, const float* x, float* y);
+    void axpy(int n, Scalar alpha, const Scalar* x, Scalar* y);
 
     // 向量复制: y = x
-    void copy(int n, const float* x, float* y);
+    void copy(int n, const Scalar* x, Scalar* y);
 
     // 向量缩放: x = alpha * x
-    void scal(int n, float alpha, float* x);
+    void scal(int n, Scalar alpha, Scalar* x);
 
 private:
     cublasHandle_t handle_;
 };
 
-// cuSPARSE封装
+// cuSPARSE封装（模板化）
+template<Precision P>
 class CUSparseWrapper {
 public:
+    using Scalar = PRECISION_SCALAR(P);
+    static constexpr cudaDataType_t cuda_data_type = CudaDataType<P>::value;
+
     CUSparseWrapper();
     ~CUSparseWrapper();
 
@@ -71,12 +76,12 @@ public:
     void spmv(cusparseSpMatDescr_t matA,
               const cusparseDnVecDescr_t vecX,
               cusparseDnVecDescr_t vecY,
-              float alpha, float beta, void* buffer);
+              Scalar alpha, Scalar beta, void* buffer);
 
     // ILU(0)分解
     void ilu0_setup(int n, int nz,
                     cusparseMatDescr_t mat_descr,
-                    float* d_valsILU0,
+                    Scalar* d_valsILU0,
                     const int* d_row_ptr,
                     const int* d_col_ind,
                     csrilu02Info_t ilu0_info,
@@ -84,7 +89,7 @@ public:
 
     void ilu0_compute(int n, int nz,
                       cusparseMatDescr_t mat_descr,
-                      float* d_valsILU0,
+                      Scalar* d_valsILU0,
                       const int* d_row_ptr,
                       const int* d_col_ind,
                       csrilu02Info_t ilu0_info,
@@ -106,17 +111,21 @@ private:
     cusparseHandle_t handle_;
 };
 
-// 稀疏矩阵（CSR格式）
+// 稀疏矩阵（CSR格式，模板化）
+template<Precision P>
 class SparseMatrix {
 public:
+    using Scalar = PRECISION_SCALAR(P);
+    static constexpr cudaDataType_t cuda_data_type = CudaDataType<P>::value;
+
     int rows, cols, nnz;
     std::vector<int> row_ptr;   // 行指针
     std::vector<int> col_ind;   // 列索引
-    std::vector<float> values;  // 非零值
+    std::vector<Scalar> values;  // 非零值
 
     // GPU内存
     int *d_row_ptr, *d_col_ind;
-    float *d_values;
+    Scalar *d_values;
 
     SparseMatrix(int rows, int cols, int nn);
     ~SparseMatrix();
@@ -128,11 +137,15 @@ public:
     cusparseSpMatDescr_t create_sparse_descr() const;
 };
 
-// GPU向量
+// GPU向量（模板化）
+template<Precision P>
 class GPUVector {
 public:
+    using Scalar = PRECISION_SCALAR(P);
+    static constexpr cudaDataType_t cuda_data_type = CudaDataType<P>::value;
+
     size_t n;  // 使用 size_t 避免负数
-    float* d_data;
+    Scalar* d_data;
 
     GPUVector(size_t n);
     ~GPUVector();
@@ -146,27 +159,51 @@ public:
     GPUVector& operator=(GPUVector&& other) noexcept;
 
     // 从主机数据复制
-    void upload_from_host(const float* h_data);
-    void download_to_host(float* h_data) const;
+    void upload_from_host(const Scalar* h_data);
+    void download_to_host(Scalar* h_data) const;
 
     // 创建cuSPARSE向量描述符
     cusparseDnVecDescr_t create_dnvec_descr() const;
 };
 
 // ============================================================================
-// CPU 向量运算（辅助函数）
+// CPU 向量运算（辅助函数，模板化）
 // ============================================================================
 
 namespace CPUOps {
-    float dot(const std::vector<float>& x, const std::vector<float>& y);
-    void axpy(float alpha, const std::vector<float>& x, std::vector<float>& y);
-    void scal(float alpha, std::vector<float>& x);
-    void copy(const std::vector<float>& x, std::vector<float>& y);
-    void spmv(int n, const std::vector<int>& row_ptr,
-              const std::vector<int>& col_ind,
-              const std::vector<float>& values,
-              const std::vector<float>& x,
-              std::vector<float>& y);
+    template<Precision P>
+    PRECISION_SCALAR(P) dot(
+        const std::vector<PRECISION_SCALAR(P)>& x,
+        const std::vector<PRECISION_SCALAR(P)>& y
+    );
+
+    template<Precision P>
+    void axpy(
+        PRECISION_SCALAR(P) alpha,
+        const std::vector<PRECISION_SCALAR(P)>& x,
+        std::vector<PRECISION_SCALAR(P)>& y
+    );
+
+    template<Precision P>
+    void scal(
+        PRECISION_SCALAR(P) alpha,
+        std::vector<PRECISION_SCALAR(P)>& x
+    );
+
+    template<Precision P>
+    void copy(
+        const std::vector<PRECISION_SCALAR(P)>& x,
+        std::vector<PRECISION_SCALAR(P)>& y
+    );
+
+    template<Precision P>
+    void spmv(
+        int n, const std::vector<int>& row_ptr,
+        const std::vector<int>& col_ind,
+        const std::vector<PRECISION_SCALAR(P)>& values,
+        const std::vector<PRECISION_SCALAR(P)>& x,
+        std::vector<PRECISION_SCALAR(P)>& y
+    );
 }
 
 #endif // SPARSE_UTILS_H

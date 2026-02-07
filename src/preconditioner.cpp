@@ -2,10 +2,11 @@
 #include <stdio.h>
 
 // ============================================================================
-// GPUILUPreconditioner 实现（GPU ILU0 预处理器）
+// GPUILUPreconditioner 模板实现
 // ============================================================================
 
-GPUILUPreconditioner::GPUILUPreconditioner(std::shared_ptr<CUSparseWrapper> sparse)
+template<Precision P>
+GPUILUPreconditioner<P>::GPUILUPreconditioner(std::shared_ptr<CUSparseWrapper<P>> sparse)
     : sparse_(sparse),
       rows_(0), nnz_(0),
       d_valsILU0_(nullptr),
@@ -21,7 +22,8 @@ GPUILUPreconditioner::GPUILUPreconditioner(std::shared_ptr<CUSparseWrapper> spar
       is_setup_(false) {
 }
 
-GPUILUPreconditioner::~GPUILUPreconditioner() {
+template<Precision P>
+GPUILUPreconditioner<P>::~GPUILUPreconditioner() {
     if (d_valsILU0_) cudaFree(d_valsILU0_);
     if (d_bufferILU0_) cudaFree(d_bufferILU0_);
     if (d_bufferL_) cudaFree(d_bufferL_);
@@ -36,72 +38,62 @@ GPUILUPreconditioner::~GPUILUPreconditioner() {
     if (spsvDescrU_) cusparseSpSV_destroyDescr(spsvDescrU_);
 }
 
-void GPUILUPreconditioner::setup(const SparseMatrix& A) {
+template<Precision P>
+void GPUILUPreconditioner<P>::setup(const SparseMatrix<P>& A) {
     rows_ = A.rows;
     nnz_ = A.nnz;
 
-    // 1. 分配并复制A的值到ILU(0)存储
-    CHECK_CUDA(cudaMalloc(&d_valsILU0_, nnz_ * sizeof(float)));
-    CHECK_CUDA(cudaMemcpy(d_valsILU0_, A.d_values, nnz_ * sizeof(float),
+    CHECK_CUDA(cudaMalloc(&d_valsILU0_, nnz_ * sizeof(typename GPUILUPreconditioner<P>::Scalar)));
+    CHECK_CUDA(cudaMemcpy(d_valsILU0_, A.d_values, nnz_ * sizeof(typename GPUILUPreconditioner<P>::Scalar),
                           cudaMemcpyDeviceToDevice));
 
-    // 2. 创建ILU(0)描述符
     CHECK_CUSPARSE(cusparseCreateMatDescr(&matLU_descr_));
     CHECK_CUSPARSE(cusparseSetMatType(matLU_descr_, CUSPARSE_MATRIX_TYPE_GENERAL));
     CHECK_CUSPARSE(cusparseSetMatIndexBase(matLU_descr_, CUSPARSE_INDEX_BASE_ZERO));
 
     CHECK_CUSPARSE(cusparseCreateCsrilu02Info(&ilu0_info_));
 
-    // 3. 执行ILU(0)分析（分配buffer）
     sparse_->ilu0_setup(rows_, nnz_, matLU_descr_,
                         d_valsILU0_, A.d_row_ptr, A.d_col_ind,
                         ilu0_info_, &d_bufferILU0_, &bufferILU0_size_);
 
-    // 4. 执行ILU(0)分解
     sparse_->ilu0_compute(rows_, nnz_, matLU_descr_,
                           d_valsILU0_, A.d_row_ptr, A.d_col_ind,
                           ilu0_info_, d_bufferILU0_);
 
-    // 5. 创建L和U矩阵描述符
     cusparseFillMode_t fill_lower = CUSPARSE_FILL_MODE_LOWER;
     cusparseDiagType_t diag_unit = CUSPARSE_DIAG_TYPE_UNIT;
     cusparseFillMode_t fill_upper = CUSPARSE_FILL_MODE_UPPER;
     cusparseDiagType_t diag_non_unit = CUSPARSE_DIAG_TYPE_NON_UNIT;
 
-    // L矩阵 (下三角，单位对角)
     CHECK_CUSPARSE(cusparseCreateCsr(&matL_, rows_, rows_, nnz_,
                                      A.d_row_ptr, A.d_col_ind, d_valsILU0_,
                                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
-                                     CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+                                     CUSPARSE_INDEX_BASE_ZERO, CudaDataType<P>::value));
     CHECK_CUSPARSE(cusparseSpMatSetAttribute(matL_, CUSPARSE_SPMAT_FILL_MODE,
                                              &fill_lower, sizeof(fill_lower)));
     CHECK_CUSPARSE(cusparseSpMatSetAttribute(matL_, CUSPARSE_SPMAT_DIAG_TYPE,
                                              &diag_unit, sizeof(diag_unit)));
 
-    // U矩阵 (上三角，非单位对角)
     CHECK_CUSPARSE(cusparseCreateCsr(&matU_, rows_, rows_, nnz_,
                                      A.d_row_ptr, A.d_col_ind, d_valsILU0_,
                                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
-                                     CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+                                     CUSPARSE_INDEX_BASE_ZERO, CudaDataType<P>::value));
     CHECK_CUSPARSE(cusparseSpMatSetAttribute(matU_, CUSPARSE_SPMAT_FILL_MODE,
                                              &fill_upper, sizeof(fill_upper)));
     CHECK_CUSPARSE(cusparseSpMatSetAttribute(matU_, CUSPARSE_SPMAT_DIAG_TYPE,
                                              &diag_non_unit, sizeof(diag_non_unit)));
 
-    // 6. 创建SpSV描述符
     CHECK_CUSPARSE(cusparseSpSV_createDescr(&spsvDescrL_));
     CHECK_CUSPARSE(cusparseSpSV_createDescr(&spsvDescrU_));
 
-    // 7. 分配辅助向量（用于L和U之间的中间结果）
-    CHECK_CUDA(cudaMalloc(&d_y_, rows_ * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_y_, rows_ * sizeof(typename GPUILUPreconditioner<P>::Scalar)));
 
-    // 8. 创建临时向量描述符用于analysis（后续apply时会重新创建）
-    GPUVector dummy_r(rows_);
-    GPUVector dummy_x(rows_);
+    GPUVector<P> dummy_r(rows_);
+    GPUVector<P> dummy_x(rows_);
     auto vecR = dummy_r.create_dnvec_descr();
     auto vecX = dummy_x.create_dnvec_descr();
 
-    // 9. 执行三角求解分析
     sparse_->triangular_solve_setup(matL_, spsvDescrL_, vecR, vecX,
                                     &d_bufferL_, &bufferSizeL_);
     sparse_->triangular_solve_setup(matU_, spsvDescrU_, vecR, vecX,
@@ -113,24 +105,20 @@ void GPUILUPreconditioner::setup(const SparseMatrix& A) {
     is_setup_ = true;
 }
 
-void GPUILUPreconditioner::apply(const GPUVector& r, GPUVector& z) const {
+template<Precision P>
+void GPUILUPreconditioner<P>::apply(const GPUVector<P>& r, GPUVector<P>& z) const {
     if (!is_setup_) {
         printf("Error: ILUPreconditioner not setup!\n");
         exit(1);
     }
 
-    // 创建向量描述符
     auto vecR = r.create_dnvec_descr();
     auto vecY = cusparseDnVecDescr_t();
     auto vecZ = z.create_dnvec_descr();
 
-    CHECK_CUSPARSE(cusparseCreateDnVec(&vecY, rows_, d_y_, CUDA_R_32F));
+    CHECK_CUSPARSE(cusparseCreateDnVec(&vecY, rows_, d_y_, CudaDataType<P>::value));
 
-    // z = U^(-1) * L^(-1) * r
-    // 先解下三角: y = L^(-1) * r
     sparse_->triangular_solve(matL_, spsvDescrL_, vecR, vecY);
-
-    // 再解上三角: z = U^(-1) * y
     sparse_->triangular_solve(matU_, spsvDescrU_, vecY, vecZ);
 
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecR));
@@ -139,37 +127,37 @@ void GPUILUPreconditioner::apply(const GPUVector& r, GPUVector& z) const {
 }
 
 // ============================================================================
-// CPUILUPreconditioner 实现（CPU ILU0 预处理器）
+// CPUILUPreconditioner 模板实现
 // ============================================================================
 
-CPUILUPreconditioner::CPUILUPreconditioner() : n_(0) {}
+template<Precision P>
+CPUILUPreconditioner<P>::CPUILUPreconditioner() : n_(0) {}
 
-CPUILUPreconditioner::~CPUILUPreconditioner() {}
+template<Precision P>
+CPUILUPreconditioner<P>::~CPUILUPreconditioner() {}
 
-// 实现基类接口 - 接受 SparseMatrix
-void CPUILUPreconditioner::setup(const SparseMatrix& A) {
+template<Precision P>
+void CPUILUPreconditioner<P>::setup(const SparseMatrix<P>& A) {
     setup(A.rows, A.row_ptr, A.col_ind, A.values);
 }
 
-// 原有的 setup 方法（重载版本，保持向后兼容）
-void CPUILUPreconditioner::setup(int n, const std::vector<int>& row_ptr,
-                                  const std::vector<int>& col_ind,
-                                  const std::vector<float>& values) {
+template<Precision P>
+void CPUILUPreconditioner<P>::setup(int n, const std::vector<int>& row_ptr,
+                                     const std::vector<int>& col_ind,
+                                     const std::vector<typename CPUILUPreconditioner<P>::Scalar>& values) {
     n_ = n;
     row_ptr_ = row_ptr;
     col_ind_ = col_ind;
     values_ = values;
 
-    // ILU(0) 分解（基于 IKJ 版本的 Gaussian 消去法）
     for (int i = 0; i < n_; i++) {
         for (int k_idx = row_ptr_[i]; k_idx < row_ptr_[i + 1]; k_idx++) {
             int k = col_ind_[k_idx];
-
             if (k >= i) break;
 
-            float a_ik = values_[k_idx];
+            typename CPUILUPreconditioner<P>::Scalar a_ik = values_[k_idx];
 
-            float a_kk = 0.0f;
+            typename CPUILUPreconditioner<P>::Scalar a_kk = ScalarConstants<P>::zero();
             for (int p = row_ptr_[k]; p < row_ptr_[k + 1]; p++) {
                 if (col_ind_[p] == k) {
                     a_kk = values_[p];
@@ -177,7 +165,7 @@ void CPUILUPreconditioner::setup(int n, const std::vector<int>& row_ptr,
                 }
             }
 
-            if (a_kk != 0.0f) {
+            if (a_kk != ScalarConstants<P>::zero()) {
                 a_ik /= a_kk;
                 values_[k_idx] = a_ik;
 
@@ -185,7 +173,7 @@ void CPUILUPreconditioner::setup(int n, const std::vector<int>& row_ptr,
                     int j = col_ind_[j_idx];
                     if (j <= k) continue;
 
-                    float a_kj = 0.0f;
+                    typename CPUILUPreconditioner<P>::Scalar a_kj = ScalarConstants<P>::zero();
                     for (int p = row_ptr_[k]; p < row_ptr_[k + 1]; p++) {
                         if (col_ind_[p] == j) {
                             a_kj = values_[p];
@@ -193,7 +181,7 @@ void CPUILUPreconditioner::setup(int n, const std::vector<int>& row_ptr,
                         }
                     }
 
-                    if (a_kj != 0.0f) {
+                    if (a_kj != ScalarConstants<P>::zero()) {
                         values_[j_idx] -= a_ik * a_kj;
                     }
                 }
@@ -202,15 +190,19 @@ void CPUILUPreconditioner::setup(int n, const std::vector<int>& row_ptr,
     }
 }
 
-void CPUILUPreconditioner::apply(const std::vector<float>& r, std::vector<float>& z) const {
-    std::vector<float> y(n_);
+template<Precision P>
+void CPUILUPreconditioner<P>::apply(const std::vector<typename CPUILUPreconditioner<P>::Scalar>& r,
+                                     std::vector<typename CPUILUPreconditioner<P>::Scalar>& z) const {
+    std::vector<typename CPUILUPreconditioner<P>::Scalar> y(n_);
     forward_substitute(r, y);
     backward_substitute(y, z);
 }
 
-void CPUILUPreconditioner::forward_substitute(const std::vector<float>& b, std::vector<float>& y) const {
+template<Precision P>
+void CPUILUPreconditioner<P>::forward_substitute(const std::vector<typename CPUILUPreconditioner<P>::Scalar>& b,
+                                                  std::vector<typename CPUILUPreconditioner<P>::Scalar>& y) const {
     for (int i = 0; i < n_; i++) {
-        float sum = b[i];
+        typename CPUILUPreconditioner<P>::Scalar sum = b[i];
         for (int j = row_ptr_[i]; j < row_ptr_[i + 1]; j++) {
             int col = col_ind_[j];
             if (col < i) {
@@ -221,10 +213,12 @@ void CPUILUPreconditioner::forward_substitute(const std::vector<float>& b, std::
     }
 }
 
-void CPUILUPreconditioner::backward_substitute(const std::vector<float>& y, std::vector<float>& x) const {
+template<Precision P>
+void CPUILUPreconditioner<P>::backward_substitute(const std::vector<typename CPUILUPreconditioner<P>::Scalar>& y,
+                                                   std::vector<typename CPUILUPreconditioner<P>::Scalar>& x) const {
     for (int i = n_ - 1; i >= 0; i--) {
-        float sum = y[i];
-        float diag = 1.0f;
+        typename CPUILUPreconditioner<P>::Scalar sum = y[i];
+        typename CPUILUPreconditioner<P>::Scalar diag = ScalarConstants<P>::one();
 
         for (int j = row_ptr_[i]; j < row_ptr_[i + 1]; j++) {
             int col = col_ind_[j];
@@ -238,3 +232,13 @@ void CPUILUPreconditioner::backward_substitute(const std::vector<float>& y, std:
         x[i] = sum / diag;
     }
 }
+
+// ============================================================================
+// 显式模板实例化
+// ============================================================================
+
+template class GPUILUPreconditioner<Precision::Float32>;
+template class GPUILUPreconditioner<Precision::Float64>;
+
+template class CPUILUPreconditioner<Precision::Float32>;
+template class CPUILUPreconditioner<Precision::Float64>;

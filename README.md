@@ -5,11 +5,13 @@
 ## 特性
 
 - ✅ **CPU/GPU 统一接口**：通过 `Backend` 枚举选择计算后端
+- ✅ **单/双精度支持**：完整支持 float32 和 float64，类型安全，零运行时开销
 - ✅ **ILU(0) 预处理**：显著减少迭代次数（~69%）
 - ✅ **GPU 加速**：使用 CUDA、cuSPARSE、cuBLAS
 - ✅ **模块化架构**：清晰的分层设计，易于扩展
 - ✅ **现代 C++**：C++14 标准，RAII 资源管理
 - ✅ **完全 RAII**：智能指针自动管理内存，异常安全
+- ✅ **模板化设计**：编译期多态，类型安全
 
 ## 性能
 
@@ -38,6 +40,7 @@ pcg_solver/
 ├── README.md               # 本文件
 │
 ├── include/                # 公共头文件
+│   ├── precision_traits.h  # 精度特征和类型映射
 │   ├── pcg_solver.h        # PCG 求解器（CPU/GPU 统一接口）
 │   ├── preconditioner.h    # 预处理器（模板基类 + 实现）
 │   └── sparse_utils.h      # 稀疏矩阵和 CUDA 封装
@@ -90,6 +93,14 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 
 ```bash
 cd examples
+
+# 单精度测试
+./build/main matrix_poisson_P1_14401 matrix_poisson_P1rhs_14401 float
+
+# 双精度测试
+./build/main matrix_poisson_P1_14401 matrix_poisson_P1rhs_14401 double
+
+# 默认（单精度）
 ./build/main matrix_poisson_P1_14401 matrix_poisson_P1rhs_14401
 ```
 
@@ -136,24 +147,26 @@ cd examples
 
 ## C++ API
 
-### 基本使用
+### 基本使用（单精度）
 
 ```cpp
 #include "pcg_solver.h"
 #include "preconditioner.h"
+#include "precision_traits.h"
 
 // 配置求解器
 PCGConfig config;
 config.max_iterations = 1000;
-config.tolerance = 1e-6f;
+config.tolerance = 1e-6;
 config.use_preconditioner = true;
-config.backend = BACKEND_GPU;  // 或 BACKEND_CPU
+config.backend = BACKEND_GPU;
+config.precision = Precision::Float32;  // 单精度
 
 // 创建求解器
-PCGSolver solver(config);
+PCGSolver<Precision::Float32> solver(config);
 
 // 准备矩阵和右端项
-SparseMatrix A(rows, cols, nnz);
+SparseMatrix<Precision::Float32> A(rows, cols, nnz);
 // ... 填充矩阵数据 ...
 A.upload_to_gpu();
 
@@ -168,6 +181,32 @@ std::cout << "Iterations: " << stats.iterations << std::endl;
 std::cout << "Final residual: " << stats.final_residual << std::endl;
 std::cout << "Converged: " << (stats.converged ? "Yes" : "No") << std::endl;
 std::cout << "Time: " << stats.solve_time << " s" << std::endl;
+```
+
+### 使用双精度
+
+```cpp
+// 使用双精度
+config.precision = Precision::Float64;
+
+PCGSolver<Precision::Float64> solver(config);
+SparseMatrix<Precision::Float64> A(rows, cols, nnz);
+std::vector<double> b(n, 1.0);
+std::vector<double> x(n, 0.0);
+
+SolveStats stats = solver.solve(A, b, x);
+```
+
+### 使用类型别名（更简洁）
+
+```cpp
+// 使用类型别名
+using PCGSolverFloat = PCGSolver<Precision::Float32>;
+using SparseMatrixFloat = SparseMatrix<Precision::Float32>;
+
+PCGSolverFloat solver(config);
+SparseMatrixFloat A(rows, cols, nnz);
+std::vector<float> b(n), x(n);
 ```
 
 ### 高级用法：自定义预处理器

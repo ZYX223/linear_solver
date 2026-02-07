@@ -86,26 +86,26 @@ std::vector<float> read_rhs_file(const std::string& filename, int& n) {
 
 // 打印统计信息
 void print_stats_line(const std::string& label, const SolveStats& stats) {
-    std::cout << "  " << std::left << std::setw(22) << label
-              << " | " << std::right << std::setw(6) << stats.iterations
-              << " | " << std::scientific << std::setprecision(2) << stats.final_residual
-              << " | " << std::fixed << std::setprecision(4) << stats.solve_time << " s"
-              << " | " << std::setw(10) << (stats.converged ? "Yes" : "No")
+    std::cout << "  " << std::left << std::setw(24) << label
+              << " | " << std::right << std::setw(7) << stats.iterations
+              << " | " << std::scientific << std::setprecision(2) << std::setw(11) << stats.final_residual
+              << " | " << std::fixed << std::setprecision(4) << std::setw(10) << stats.solve_time
+              << " | " << std::setw(10) << std::right << (stats.converged ? "Yes" : "No")
               << " |" << std::endl;
 }
 
 // 打印表格分隔线
 void print_separator() {
-    std::cout << "  " << std::string(82, '-') << std::endl;
+    std::cout << "  " << std::string(84, '-') << std::endl;
 }
 
 // 打印表格头
 void print_table_header() {
     print_separator();
-    std::cout << "  " << std::left << std::setw(22) << "Method"
-              << " | " << std::right << std::setw(6) << "Iters"
-              << " | " << std::setw(10) << "Residual"
-              << " | " << std::setw(11) << "Time (s)"
+    std::cout << "  " << std::left << std::setw(24) << "Method"
+              << " | " << std::right << std::setw(7) << "Iters"
+              << " | " << std::setw(11) << "Residual"
+              << " | " << std::setw(10) << "Time (s)"
               << " | " << std::setw(10) << "Converged"
               << " |" << std::endl;
     print_separator();
@@ -132,8 +132,7 @@ void save_solution(const std::string& filename, const std::vector<float>& x) {
 
 // 运行测试
 void run_test(const std::string& name, Backend backend, bool use_ilu,
-              const SparseMatrix& A, const std::vector<float>& b, int n,
-              const std::string& output_prefix = "") {
+              const SparseMatrix& A, const std::vector<float>& b, int n) {
     PCGConfig config;
     config.max_iterations = 1000;
     config.tolerance = 1e-6f;
@@ -146,14 +145,9 @@ void run_test(const std::string& name, Backend backend, bool use_ilu,
     SolveStats stats = solver.solve(A, b, x);
     print_stats_line(name, stats);
 
-    // 保存解向量
-    if (!output_prefix.empty()) {
-        std::string filename = output_prefix + "_" + name + ".txt";
-        // 替换空格和括号，使文件名更友好
-        std::replace(filename.begin(), filename.end(), ' ', '_');
-        filename.erase(std::remove(filename.begin(), filename.end(), '('), filename.end());
-        filename.erase(std::remove(filename.begin(), filename.end(), ')'), filename.end());
-        save_solution(filename, x);
+    // 仅保存 GPU ILU0 版本的解向量
+    if (name == "GPU + ILU(0)") {
+        save_solution("solution_gpu_ilu0.txt", x);
     }
 }
 
@@ -187,13 +181,10 @@ int main(int argc, char** argv) {
     std::cout << "\n[3/3] 运行测试...\n";
     print_table_header();
 
-    // 生成输出文件前缀（基于矩阵文件名）
-    std::string output_prefix = matrix_file;
-
-    run_test("CPU (无预处理)", BACKEND_CPU, false, *A, b, n, output_prefix);
-    run_test("CPU + ILU(0)", BACKEND_CPU, true, *A, b, n, output_prefix);
-    run_test("GPU (无预处理)", BACKEND_GPU, false, *A, b, n, output_prefix);
-    run_test("GPU + ILU(0)", BACKEND_GPU, true, *A, b, n, output_prefix);
+    run_test("CPU (无预处理)", BACKEND_CPU, false, *A, b, n);
+    run_test("CPU + ILU(0)", BACKEND_CPU, true, *A, b, n);
+    run_test("GPU (无预处理)", BACKEND_GPU, false, *A, b, n);
+    run_test("GPU + ILU(0)", BACKEND_GPU, true, *A, b, n);
 
     print_separator();
 

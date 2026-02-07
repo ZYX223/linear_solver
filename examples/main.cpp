@@ -86,28 +86,28 @@ std::vector<float> read_rhs_file(const std::string& filename, int& n) {
 
 // 打印统计信息
 void print_stats_line(const std::string& label, const SolveStats& stats) {
-    std::cout << "  " << std::setw(25) << std::left << label
-              << " | " << std::setw(6) << stats.iterations
-              << " | " << std::scientific << std::setw(10) << stats.final_residual
-              << " | " << std::fixed << std::setw(10) << std::setprecision(4) << stats.solve_time
+    std::cout << "  " << std::left << std::setw(22) << label
+              << " | " << std::right << std::setw(6) << stats.iterations
+              << " | " << std::scientific << std::setprecision(2) << stats.final_residual
+              << " | " << std::fixed << std::setprecision(4) << stats.solve_time << " s"
               << " | " << std::setw(10) << (stats.converged ? "Yes" : "No")
-              << " |\n";
+              << " |" << std::endl;
 }
 
 // 打印表格分隔线
 void print_separator() {
-    std::cout << "  " << std::string(85, '-') << "\n";
+    std::cout << "  " << std::string(82, '-') << std::endl;
 }
 
 // 打印表格头
 void print_table_header() {
     print_separator();
-    std::cout << "  " << std::setw(25) << std::left << "Method"
-              << " | " << std::setw(6) << "Iters"
+    std::cout << "  " << std::left << std::setw(22) << "Method"
+              << " | " << std::right << std::setw(6) << "Iters"
               << " | " << std::setw(10) << "Residual"
-              << " | " << std::setw(10) << "Time (s)"
+              << " | " << std::setw(11) << "Time (s)"
               << " | " << std::setw(10) << "Converged"
-              << " |\n";
+              << " |" << std::endl;
     print_separator();
 }
 
@@ -128,7 +128,6 @@ void save_solution(const std::string& filename, const std::vector<float>& x) {
     }
 
     file.close();
-    std::cout << "  解向量已保存到: " << filename << std::endl;
 }
 
 // 运行测试

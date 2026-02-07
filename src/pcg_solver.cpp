@@ -10,14 +10,12 @@
 
 PCGSolver::PCGSolver(const PCGConfig& config)
     : config_(config),
-      d_r_(nullptr), d_z_(nullptr), d_rm2_(nullptr), d_zm2_(nullptr),
-      d_p_(nullptr), d_Ap_(nullptr),
       d_buffer_spMV_(nullptr), buffer_spMV_size_(0) {
 
     backend_ = config.backend;
 
     if (backend_ == BACKEND_GPU) {
-        blas_ = std::make_shared<CUBLASWrapper>();
+        blas_ = std::make_unique<CUBLASWrapper>();
         sparse_ = std::make_shared<CUSparseWrapper>();
     }
 }
@@ -26,7 +24,7 @@ PCGSolver::~PCGSolver() {
     free_workspace();
 }
 
-void PCGSolver::set_preconditioner(std::shared_ptr<Preconditioner> prec) {
+void PCGSolver::set_preconditioner(std::shared_ptr<PreconditionerBase<GPUVector>> prec) {
     if (backend_ == BACKEND_GPU) {
         preconditioner_ = prec;
     }
@@ -34,25 +32,26 @@ void PCGSolver::set_preconditioner(std::shared_ptr<Preconditioner> prec) {
 
 void PCGSolver::allocate_workspace(int n) {
     if (backend_ == BACKEND_GPU) {
-        d_r_ = new GPUVector(n);
-        d_z_ = new GPUVector(n);
-        d_rm2_ = new GPUVector(n);
-        d_zm2_ = new GPUVector(n);
-        d_p_ = new GPUVector(n);
-        d_Ap_ = new GPUVector(n);
+        d_r_ = std::make_unique<GPUVector>(n);
+        d_z_ = std::make_unique<GPUVector>(n);
+        d_rm2_ = std::make_unique<GPUVector>(n);
+        d_zm2_ = std::make_unique<GPUVector>(n);
+        d_p_ = std::make_unique<GPUVector>(n);
+        d_Ap_ = std::make_unique<GPUVector>(n);
     }
     // CPU 不需要预分配
 }
 
 void PCGSolver::free_workspace() {
     if (backend_ == BACKEND_GPU) {
-        if (d_r_) { delete d_r_; d_r_ = nullptr; }
-        if (d_z_) { delete d_z_; d_z_ = nullptr; }
-        if (d_rm2_) { delete d_rm2_; d_rm2_ = nullptr; }
-        if (d_zm2_) { delete d_zm2_; d_zm2_ = nullptr; }
-        if (d_p_) { delete d_p_; d_p_ = nullptr; }
-        if (d_Ap_) { delete d_Ap_; d_Ap_ = nullptr; }
-        if (d_buffer_spMV_) { cudaFree(d_buffer_spMV_); d_buffer_spMV_ = nullptr; }
+        // unique_ptr 会自动调用 GPUVector 的析构函数释放 GPU 内存
+        d_r_.reset();
+        d_z_.reset();
+        d_rm2_.reset();
+        d_zm2_.reset();
+        d_p_.reset();
+        d_Ap_.reset();
+        d_buffer_spMV_.reset();  // 自动调用 cudaFree
     }
 }
 
@@ -64,6 +63,18 @@ SolveStats PCGSolver::solve(const SparseMatrix& A,
     } else {
         return solve_cpu(A, b, x);
     }
+}
+
+// ============================================================================
+// 辅助函数：创建统计信息
+// ============================================================================
+inline SolveStats create_stats(int k, float r1, bool converged, float time) {
+    SolveStats stats;
+    stats.iterations = k;
+    stats.final_residual = sqrt(r1);
+    stats.converged = converged;
+    stats.solve_time = time;
+    return stats;
 }
 
 // ============================================================================
@@ -87,7 +98,9 @@ SolveStats PCGSolver::solve_gpu(const SparseMatrix& A,
                                            &floatone, matA, vecp, &floatzero, vecAp,
                                            CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT,
                                            &buffer_spMV_size_));
-    CHECK_CUDA(cudaMalloc(&d_buffer_spMV_, buffer_spMV_size_));
+    void* buffer = nullptr;
+    CHECK_CUDA(cudaMalloc(&buffer, buffer_spMV_size_));
+    d_buffer_spMV_.reset(buffer);
 
     // 延迟初始化预处理器（如果需要）
     if (config_.use_preconditioner && !preconditioner_) {
@@ -131,7 +144,7 @@ SolveStats PCGSolver::solve_gpu(const SparseMatrix& A,
             blas_->axpy(n, floatone, d_z_->d_data, d_p_->d_data);
         }
 
-        sparse_->spmv(matA, vecp, vecAp, floatone, floatzero, d_buffer_spMV_);
+        sparse_->spmv(matA, vecp, vecAp, floatone, floatzero, d_buffer_spMV_.get());
 
         float numerator = blas_->dot(n, d_r_->d_data, d_z_->d_data);
         float denominator = blas_->dot(n, d_p_->d_data, d_Ap_->d_data);
@@ -159,13 +172,7 @@ SolveStats PCGSolver::solve_gpu(const SparseMatrix& A,
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecR));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecZ));
 
-    SolveStats stats;
-    stats.iterations = k;
-    stats.final_residual = sqrt(r1);
-    stats.converged = (k <= max_iter);
-    stats.solve_time = solve_time;
-
-    return stats;
+    return create_stats(k, r1, k <= max_iter, solve_time);
 }
 
 // ============================================================================
@@ -188,7 +195,7 @@ SolveStats PCGSolver::solve_cpu(const SparseMatrix& A,
     std::vector<float> zm2(n);
 
     if (config_.use_preconditioner) {
-        cpu_ilu_prec_ = std::make_shared<CPUIILUPreconditioner>();
+        cpu_ilu_prec_ = std::make_unique<CPUILUPreconditioner>();
         cpu_ilu_prec_->setup(A.rows, A.row_ptr, A.col_ind, A.values);
     }
 
@@ -236,11 +243,5 @@ SolveStats PCGSolver::solve_cpu(const SparseMatrix& A,
     auto end = std::chrono::high_resolution_clock::now();
     float solve_time = std::chrono::duration<float>(end - start).count();
 
-    SolveStats stats;
-    stats.iterations = k;
-    stats.final_residual = sqrt(r1);
-    stats.converged = (k <= max_iter);
-    stats.solve_time = solve_time;
-
-    return stats;
+    return create_stats(k, r1, k <= max_iter, solve_time);
 }

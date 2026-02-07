@@ -172,7 +172,7 @@ cusparseSpMatDescr_t SparseMatrix::create_sparse_descr() const {
 // GPUVector 实现
 // ============================================================================
 
-GPUVector::GPUVector(int n) : n(n), d_data(nullptr) {
+GPUVector::GPUVector(size_t n) : n(n), d_data(nullptr) {
     CHECK_CUDA(cudaMalloc(&d_data, n * sizeof(float)));
 }
 
@@ -180,6 +180,32 @@ GPUVector::~GPUVector() {
     if (d_data) {
         cudaFree(d_data);
     }
+}
+
+// 移动构造函数
+GPUVector::GPUVector(GPUVector&& other) noexcept
+    : n(other.n), d_data(other.d_data) {
+    other.n = 0;
+    other.d_data = nullptr;
+}
+
+// 移动赋值运算符
+GPUVector& GPUVector::operator=(GPUVector&& other) noexcept {
+    if (this != &other) {
+        // 释放当前资源
+        if (d_data) {
+            cudaFree(d_data);
+        }
+
+        // 窃取其他对象的资源
+        n = other.n;
+        d_data = other.d_data;
+
+        // 将其他对象置为有效但空的状态
+        other.n = 0;
+        other.d_data = nullptr;
+    }
+    return *this;
 }
 
 void GPUVector::upload_from_host(const float* h_data) {

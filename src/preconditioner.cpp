@@ -2,20 +2,6 @@
 #include <stdio.h>
 
 // ============================================================================
-// NonePreconditioner 实现
-// ============================================================================
-
-void NonePreconditioner::setup(const SparseMatrix& A) {
-    // 无需设置
-}
-
-void NonePreconditioner::apply(const GPUVector& r, GPUVector& z) {
-    // z = r (单位预处理)
-    CHECK_CUDA(cudaMemcpy(z.d_data, r.d_data, r.n * sizeof(float),
-                          cudaMemcpyDeviceToDevice));
-}
-
-// ============================================================================
 // GPUILUPreconditioner 实现（GPU ILU0 预处理器）
 // ============================================================================
 
@@ -127,7 +113,7 @@ void GPUILUPreconditioner::setup(const SparseMatrix& A) {
     is_setup_ = true;
 }
 
-void GPUILUPreconditioner::apply(const GPUVector& r, GPUVector& z) {
+void GPUILUPreconditioner::apply(const GPUVector& r, GPUVector& z) const {
     if (!is_setup_) {
         printf("Error: ILUPreconditioner not setup!\n");
         exit(1);
@@ -153,14 +139,20 @@ void GPUILUPreconditioner::apply(const GPUVector& r, GPUVector& z) {
 }
 
 // ============================================================================
-// CPUIILUPreconditioner 实现（CPU ILU0 预处理器）
+// CPUILUPreconditioner 实现（CPU ILU0 预处理器）
 // ============================================================================
 
-CPUIILUPreconditioner::CPUIILUPreconditioner() : n_(0) {}
+CPUILUPreconditioner::CPUILUPreconditioner() : n_(0) {}
 
-CPUIILUPreconditioner::~CPUIILUPreconditioner() {}
+CPUILUPreconditioner::~CPUILUPreconditioner() {}
 
-void CPUIILUPreconditioner::setup(int n, const std::vector<int>& row_ptr,
+// 实现基类接口 - 接受 SparseMatrix
+void CPUILUPreconditioner::setup(const SparseMatrix& A) {
+    setup(A.rows, A.row_ptr, A.col_ind, A.values);
+}
+
+// 原有的 setup 方法（重载版本，保持向后兼容）
+void CPUILUPreconditioner::setup(int n, const std::vector<int>& row_ptr,
                                   const std::vector<int>& col_ind,
                                   const std::vector<float>& values) {
     n_ = n;
@@ -210,13 +202,13 @@ void CPUIILUPreconditioner::setup(int n, const std::vector<int>& row_ptr,
     }
 }
 
-void CPUIILUPreconditioner::apply(const std::vector<float>& r, std::vector<float>& z) const {
+void CPUILUPreconditioner::apply(const std::vector<float>& r, std::vector<float>& z) const {
     std::vector<float> y(n_);
     forward_substitute(r, y);
     backward_substitute(y, z);
 }
 
-void CPUIILUPreconditioner::forward_substitute(const std::vector<float>& b, std::vector<float>& y) const {
+void CPUILUPreconditioner::forward_substitute(const std::vector<float>& b, std::vector<float>& y) const {
     for (int i = 0; i < n_; i++) {
         float sum = b[i];
         for (int j = row_ptr_[i]; j < row_ptr_[i + 1]; j++) {
@@ -229,7 +221,7 @@ void CPUIILUPreconditioner::forward_substitute(const std::vector<float>& b, std:
     }
 }
 
-void CPUIILUPreconditioner::backward_substitute(const std::vector<float>& y, std::vector<float>& x) const {
+void CPUILUPreconditioner::backward_substitute(const std::vector<float>& y, std::vector<float>& x) const {
     for (int i = n_ - 1; i >= 0; i--) {
         float sum = y[i];
         float diag = 1.0f;

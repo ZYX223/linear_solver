@@ -7,34 +7,32 @@
 #include <vector>
 
 // ============================================================================
-// 预处理器抽象接口（GPU）
+// 预处理器模板基类（统一 CPU/GPU 接口）
 // ============================================================================
-class Preconditioner {
+template<typename VectorType>
+class PreconditionerBase {
 public:
-    virtual ~Preconditioner() = default;
+    virtual ~PreconditionerBase() = default;
 
     // 初始化预处理器（如ILU分解）
     virtual void setup(const SparseMatrix& A) = 0;
 
     // 应用预处理器: z = M^(-1) * r
-    virtual void apply(const GPUVector& r, GPUVector& z) = 0;
+    virtual void apply(const VectorType& r, VectorType& z) const = 0;
 };
 
-// 无预处理（GPU）
-class NonePreconditioner : public Preconditioner {
-public:
-    void setup(const SparseMatrix& A) override;
-    void apply(const GPUVector& r, GPUVector& z) override;
-};
+// ============================================================================
+// GPU 预处理器
+// ============================================================================
 
 // ILU(0)预处理器（GPU）
-class GPUILUPreconditioner : public Preconditioner {
+class GPUILUPreconditioner : public PreconditionerBase<GPUVector> {
 public:
     GPUILUPreconditioner(std::shared_ptr<CUSparseWrapper> sparse);
     ~GPUILUPreconditioner();
 
     void setup(const SparseMatrix& A) override;
-    void apply(const GPUVector& r, GPUVector& z) override;
+    void apply(const GPUVector& r, GPUVector& z) const override;
 
 private:
     std::shared_ptr<CUSparseWrapper> sparse_;
@@ -74,16 +72,19 @@ private:
 // CPU ILU(0) 预处理器
 // ============================================================================
 
-class CPUIILUPreconditioner {
+class CPUILUPreconditioner : public PreconditionerBase<std::vector<float>> {
 public:
-    CPUIILUPreconditioner();
-    ~CPUIILUPreconditioner();
+    CPUILUPreconditioner();
+    ~CPUILUPreconditioner() override;
 
+    // 实现基类接口
+    void setup(const SparseMatrix& A) override;
+    void apply(const std::vector<float>& r, std::vector<float>& z) const override;
+
+    // 重载版本（保持向后兼容）
     void setup(int n, const std::vector<int>& row_ptr,
               const std::vector<int>& col_ind,
               const std::vector<float>& values);
-
-    void apply(const std::vector<float>& r, std::vector<float>& z) const;
 
 private:
     int n_;

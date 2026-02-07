@@ -131,11 +131,19 @@ public:
 // GPU向量
 class GPUVector {
 public:
-    int n;
+    size_t n;  // 使用 size_t 避免负数
     float* d_data;
 
-    GPUVector(int n);
+    GPUVector(size_t n);
     ~GPUVector();
+
+    // 禁止拷贝（CUDA 资源不应该被拷贝）
+    GPUVector(const GPUVector&) = delete;
+    GPUVector& operator=(const GPUVector&) = delete;
+
+    // 支持移动（提高性能）
+    GPUVector(GPUVector&& other) noexcept;
+    GPUVector& operator=(GPUVector&& other) noexcept;
 
     // 从主机数据复制
     void upload_from_host(const float* h_data);

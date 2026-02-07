@@ -47,7 +47,7 @@ public:
     ~PCGSolver();
 
     // 设置预处理器（仅 GPU）
-    void set_preconditioner(std::shared_ptr<Preconditioner> prec);
+    void set_preconditioner(std::shared_ptr<PreconditionerBase<GPUVector>> prec);
 
     // 求解 Ax = b
     SolveStats solve(const SparseMatrix& A,
@@ -55,28 +55,38 @@ public:
                     std::vector<float>& x);
 
 private:
+    // CUDA buffer 自定义删除器
+    struct CudaBufferDeleter {
+        void operator()(void* ptr) const {
+            if (ptr) {
+                cudaFree(ptr);
+            }
+        }
+    };
+
     PCGConfig config_;
     Backend backend_;
 
     // GPU 后端成员
-    std::shared_ptr<CUBLASWrapper> blas_;
+    std::unique_ptr<CUBLASWrapper> blas_;
     std::shared_ptr<CUSparseWrapper> sparse_;
-    std::shared_ptr<Preconditioner> preconditioner_;
-    GPUVector* d_r_;
-    GPUVector* d_z_;
-    GPUVector* d_rm2_;
-    GPUVector* d_zm2_;
-    GPUVector* d_p_;
-    GPUVector* d_Ap_;
-    void* d_buffer_spMV_;
+    std::shared_ptr<PreconditionerBase<GPUVector>> preconditioner_;
+    std::unique_ptr<GPUVector> d_r_;
+    std::unique_ptr<GPUVector> d_z_;
+    std::unique_ptr<GPUVector> d_rm2_;
+    std::unique_ptr<GPUVector> d_zm2_;
+    std::unique_ptr<GPUVector> d_p_;
+    std::unique_ptr<GPUVector> d_Ap_;
+    std::unique_ptr<void, CudaBufferDeleter> d_buffer_spMV_;
     size_t buffer_spMV_size_;
 
     // CPU 后端成员
-    std::shared_ptr<CPUIILUPreconditioner> cpu_ilu_prec_;
+    std::unique_ptr<CPUILUPreconditioner> cpu_ilu_prec_;
 
     // 方法
     void allocate_workspace(int n);
     void free_workspace();
+
     SolveStats solve_gpu(const SparseMatrix& A,
                         const std::vector<float>& b,
                         std::vector<float>& x);

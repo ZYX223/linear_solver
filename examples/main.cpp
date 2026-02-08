@@ -1,4 +1,5 @@
 #include "../include/pcg_solver.h"
+#include "../include/amg_solver.h"
 #include "../include/preconditioner.h"
 #include "../include/precision_traits.h"
 #include <iostream>
@@ -22,8 +23,6 @@ SparseMatrix<P>* read_matrix_file(const std::string& filename) {
 
     int rows, cols, nnz;
     file >> rows >> cols >> nnz;
-
-    std::cout << "  矩阵信息: " << rows << " x " << cols << ", nnz = " << nnz << std::endl;
 
     SparseMatrix<P>* A = new SparseMatrix<P>(rows, cols, nnz);
 
@@ -73,7 +72,6 @@ std::vector<typename ScalarType<P>::type> read_rhs_file(const std::string& filen
     }
 
     file >> n;
-    std::cout << "  右端项大小: " << n << std::endl;
 
     using Scalar = typename ScalarType<P>::type;
     std::vector<Scalar> b(n);
@@ -130,9 +128,9 @@ void save_solution(const std::string& filename, const std::vector<typename Scala
 }
 
 template<Precision P>
-void run_test(const std::string& name, Backend backend, bool use_ilu,
-              const SparseMatrix<P>& A, const std::vector<typename ScalarType<P>::type>& b, int n,
-              bool save_sol = false) {
+void run_pcg_test(const std::string& name, Backend backend, bool use_ilu,
+                  const SparseMatrix<P>& A, const std::vector<typename ScalarType<P>::type>& b, int n,
+                  const std::string& output_dir) {
     PCGConfig config;
     config.max_iterations = 1000;
     config.tolerance = 1e-6;
@@ -146,18 +144,46 @@ void run_test(const std::string& name, Backend backend, bool use_ilu,
     SolveStats stats = solver.solve(A, b, x);
     print_stats_line(name, stats);
 
-    if (save_sol) {
-        std::string filename = "solution_gpu_ilu0_" + std::string(P == Precision::Float32 ? "float" : "double") + ".txt";
-        save_solution<P>(filename, x);
-    }
+    // 保存解向量
+    std::string precision_str = (P == Precision::Float32) ? "float" : "double";
+    std::string backend_str = (backend == BACKEND_CPU) ? "cpu" : "gpu";
+    std::string filename = output_dir + "/solution_pcg_" + backend_str + "_" + precision_str + ".dat";
+    save_solution<P>(filename, x);
 }
 
 template<Precision P>
-void run_all_tests(const SparseMatrix<P>& A, const std::vector<typename ScalarType<P>::type>& b, int n) {
-    run_test<P>("CPU (无预处理)", BACKEND_CPU, false, A, b, n);
-    run_test<P>("CPU + ILU(0)", BACKEND_CPU, true, A, b, n);
-    run_test<P>("GPU (无预处理)", BACKEND_GPU, false, A, b, n);
-    run_test<P>("GPU + ILU(0)", BACKEND_GPU, true, A, b, n, true);
+void run_amg_test(const std::string& name,
+                  const SparseMatrix<P>& A,
+                  const std::vector<typename ScalarType<P>::type>& b, int n,
+                  const std::string& output_dir) {
+    AMGConfig config;
+    config.max_iterations = 100;
+    config.tolerance = 1e-6;
+    config.precision = P;
+    config.max_levels = 10;
+    config.coarse_grid_size = 50;
+    config.pre_smooth_steps = 1;
+    config.post_smooth_steps = 1;
+
+    using Scalar = typename ScalarType<P>::type;
+    std::vector<Scalar> x(n, ScalarConstants<P>::zero());
+
+    AMGSolver<P> solver(config);
+    SolveStats stats = solver.solve(A, b, x);
+    print_stats_line(name, stats);
+
+    // 保存解向量
+    std::string precision_str = (P == Precision::Float32) ? "float" : "double";
+    std::string filename = output_dir + "/solution_amg_cpu_" + precision_str + ".dat";
+    save_solution<P>(filename, x);
+}
+
+template<Precision P>
+void run_all_tests(const SparseMatrix<P>& A, const std::vector<typename ScalarType<P>::type>& b, int n,
+                   const std::string& output_dir) {
+    run_pcg_test<P>("PCG (CPU)", BACKEND_CPU, true, A, b, n, output_dir);
+    run_pcg_test<P>("PCG (GPU)", BACKEND_GPU, true, A, b, n, output_dir);
+    run_amg_test<P>("AMG (CPU)", A, b, n, output_dir);
 }
 
 // ============================================================================
@@ -187,13 +213,16 @@ int main(int argc, char** argv) {
 
     std::cout << "\n";
     std::cout << "========================================\n";
-    std::cout << "  PCG 求解器综合测试\n";
+    std::cout << " 求解器综合测试\n";
     std::cout << "========================================\n\n";
 
     std::cout << "[1/3] 读取矩阵文件: " << matrix_file << "\n";
     std::cout << "[2/3] 读取右端项文件: " << rhs_file << "\n";
-    std::cout << "[3/3] 运行测试...\n";
-    print_table_header();
+
+    // 提取输出目录（与矩阵文件同级）
+    size_t last_slash = matrix_file.find_last_of('/');
+    std::string output_dir = (last_slash != std::string::npos) ?
+                             matrix_file.substr(0, last_slash) : ".";
 
     // 根据精度分发到不同的实现
     if (prec == Precision::Float32) {
@@ -201,7 +230,12 @@ int main(int argc, char** argv) {
         int n;
         std::vector<float> b = read_rhs_file<Precision::Float32>(rhs_file, n);
 
-        run_all_tests<Precision::Float32>(*A, b, n);
+        std::cout << "[3/3] 运行测试...\n";
+        std::cout << "\n问题规模: " << A->rows << " × " << A->cols << ", nnz = " << A->nnz << "\n";
+        std::cout << "右端项大小: " << n << "\n";
+        print_table_header();
+
+        run_all_tests<Precision::Float32>(*A, b, n, output_dir);
 
         delete A;
     } else {
@@ -209,7 +243,12 @@ int main(int argc, char** argv) {
         int n;
         std::vector<double> b = read_rhs_file<Precision::Float64>(rhs_file, n);
 
-        run_all_tests<Precision::Float64>(*A, b, n);
+        std::cout << "[3/3] 运行测试...\n";
+        std::cout << "\n问题规模: " << A->rows << " × " << A->cols << ", nnz = " << A->nnz << "\n";
+        std::cout << "右端项大小: " << n << "\n";
+        print_table_header();
+
+        run_all_tests<Precision::Float64>(*A, b, n, output_dir);
 
         delete A;
     }

@@ -23,7 +23,7 @@ Makefile
 *~
 
 # 输出文件
-solution.txt
+solution*
 *.out
 
 # 但保留示例数据矩阵文件

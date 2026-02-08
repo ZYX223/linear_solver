@@ -1,6 +1,6 @@
-# PCG/AMG Solver - CPU/GPU 线性求解器
+# PCG (CPU/GPU) + AMG (CPU) 线性求解器
 
-基于 NVIDIA CUDA 实现的高性能线性求解器，支持 PCG（预处理共轭梯度）和 AMG（代数多重网格）两种算法。
+基于 C++ 和 NVIDIA CUDA 实现的高性能线性求解器,支持 PCG(CPU/GPU)和 AMG(CPU)两种算法,提供单/双精度计算。
 
 ## 特性
 

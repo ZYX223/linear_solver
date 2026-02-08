@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 // ============================================================================
-// CUBLASWrapper 模板实现（使用标签分发处理S/D后缀）
+// CUBLASWrapper 模板实现（使用 if constexpr 消除精度特化重复）
 // ============================================================================
 
 template<Precision P>
@@ -17,50 +17,44 @@ CUBLASWrapper<P>::~CUBLASWrapper() {
     }
 }
 
-// float 特化版本
-template<>
-float CUBLASWrapper<Precision::Float32>::dot(int n, const float* x, const float* y) {
-    float result = 0.0f;
-    CHECK_CUBLAS(cublasSdot(handle_, n, x, 1, y, 1, &result));
+// 使用 if constexpr 消除精度特化重复代码
+template<Precision P>
+typename CUBLASWrapper<P>::Scalar
+CUBLASWrapper<P>::dot(int n, const Scalar* x, const Scalar* y) {
+    Scalar result = Scalar();
+    if constexpr (P == Precision::Float32) {
+        CHECK_CUBLAS(cublasSdot(handle_, n, x, 1, y, 1, &result));
+    } else {
+        CHECK_CUBLAS(cublasDdot(handle_, n, x, 1, y, 1, &result));
+    }
     return result;
 }
 
-template<>
-void CUBLASWrapper<Precision::Float32>::axpy(int n, float alpha, const float* x, float* y) {
-    CHECK_CUBLAS(cublasSaxpy(handle_, n, &alpha, x, 1, y, 1));
+template<Precision P>
+void CUBLASWrapper<P>::axpy(int n, Scalar alpha, const Scalar* x, Scalar* y) {
+    if constexpr (P == Precision::Float32) {
+        CHECK_CUBLAS(cublasSaxpy(handle_, n, &alpha, x, 1, y, 1));
+    } else {
+        CHECK_CUBLAS(cublasDaxpy(handle_, n, &alpha, x, 1, y, 1));
+    }
 }
 
-template<>
-void CUBLASWrapper<Precision::Float32>::copy(int n, const float* x, float* y) {
-    CHECK_CUBLAS(cublasScopy(handle_, n, x, 1, y, 1));
+template<Precision P>
+void CUBLASWrapper<P>::copy(int n, const Scalar* x, Scalar* y) {
+    if constexpr (P == Precision::Float32) {
+        CHECK_CUBLAS(cublasScopy(handle_, n, x, 1, y, 1));
+    } else {
+        CHECK_CUBLAS(cublasDcopy(handle_, n, x, 1, y, 1));
+    }
 }
 
-template<>
-void CUBLASWrapper<Precision::Float32>::scal(int n, float alpha, float* x) {
-    CHECK_CUBLAS(cublasSscal(handle_, n, &alpha, x, 1));
-}
-
-// double 特化版本
-template<>
-double CUBLASWrapper<Precision::Float64>::dot(int n, const double* x, const double* y) {
-    double result = 0.0;
-    CHECK_CUBLAS(cublasDdot(handle_, n, x, 1, y, 1, &result));
-    return result;
-}
-
-template<>
-void CUBLASWrapper<Precision::Float64>::axpy(int n, double alpha, const double* x, double* y) {
-    CHECK_CUBLAS(cublasDaxpy(handle_, n, &alpha, x, 1, y, 1));
-}
-
-template<>
-void CUBLASWrapper<Precision::Float64>::copy(int n, const double* x, double* y) {
-    CHECK_CUBLAS(cublasDcopy(handle_, n, x, 1, y, 1));
-}
-
-template<>
-void CUBLASWrapper<Precision::Float64>::scal(int n, double alpha, double* x) {
-    CHECK_CUBLAS(cublasDscal(handle_, n, &alpha, x, 1));
+template<Precision P>
+void CUBLASWrapper<P>::scal(int n, Scalar alpha, Scalar* x) {
+    if constexpr (P == Precision::Float32) {
+        CHECK_CUBLAS(cublasSscal(handle_, n, &alpha, x, 1));
+    } else {
+        CHECK_CUBLAS(cublasDscal(handle_, n, &alpha, x, 1));
+    }
 }
 
 // ============================================================================
@@ -91,74 +85,59 @@ void CUSparseWrapper<P>::spmv(cusparseSpMatDescr_t matA,
                                 CudaDataType<P>::value, CUSPARSE_SPMV_ALG_DEFAULT, buffer));
 }
 
-// float 版本的 ILU0
-template<>
-void CUSparseWrapper<Precision::Float32>::ilu0_setup(int n, int nz,
-                                                     cusparseMatDescr_t mat_descr,
-                                                     float* d_valsILU0,
-                                                     const int* d_row_ptr,
-                                                     const int* d_col_ind,
-                                                     csrilu02Info_t ilu0_info,
-                                                     void** d_buffer, int* buffer_size) {
-    CHECK_CUSPARSE(cusparseScsrilu02_bufferSize(handle_, n, nz, mat_descr,
-                                                 d_valsILU0, d_row_ptr, d_col_ind,
-                                                 ilu0_info, buffer_size));
+// 使用 if constexpr 消除 ILU0 精度特化重复代码
+template<Precision P>
+void CUSparseWrapper<P>::ilu0_setup(int n, int nz,
+                                    cusparseMatDescr_t mat_descr,
+                                    Scalar* d_valsILU0,
+                                    const int* d_row_ptr,
+                                    const int* d_col_ind,
+                                    csrilu02Info_t ilu0_info,
+                                    void** d_buffer, int* buffer_size) {
+    if constexpr (P == Precision::Float32) {
+        CHECK_CUSPARSE(cusparseScsrilu02_bufferSize(handle_, n, nz, mat_descr,
+                                                     d_valsILU0, d_row_ptr, d_col_ind,
+                                                     ilu0_info, buffer_size));
+    } else {
+        CHECK_CUSPARSE(cusparseDcsrilu02_bufferSize(handle_, n, nz, mat_descr,
+                                                     d_valsILU0, d_row_ptr, d_col_ind,
+                                                     ilu0_info, buffer_size));
+    }
     if (*d_buffer == nullptr) {
         CHECK_CUDA(cudaMalloc(d_buffer, *buffer_size));
     }
-    CHECK_CUSPARSE(cusparseScsrilu02_analysis(handle_, n, nz, mat_descr,
-                                              d_valsILU0, d_row_ptr, d_col_ind,
-                                              ilu0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
-                                              *d_buffer));
-}
-
-template<>
-void CUSparseWrapper<Precision::Float32>::ilu0_compute(int n, int nz,
-                                                       cusparseMatDescr_t mat_descr,
-                                                       float* d_valsILU0,
-                                                       const int* d_row_ptr,
-                                                       const int* d_col_ind,
-                                                       csrilu02Info_t ilu0_info,
-                                                       void* d_buffer) {
-    CHECK_CUSPARSE(cusparseScsrilu02(handle_, n, nz, mat_descr,
-                                     d_valsILU0, d_row_ptr, d_col_ind,
-                                     ilu0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
-                                     d_buffer));
-}
-
-// double 版本的 ILU0
-template<>
-void CUSparseWrapper<Precision::Float64>::ilu0_setup(int n, int nz,
-                                                     cusparseMatDescr_t mat_descr,
-                                                     double* d_valsILU0,
-                                                     const int* d_row_ptr,
-                                                     const int* d_col_ind,
-                                                     csrilu02Info_t ilu0_info,
-                                                     void** d_buffer, int* buffer_size) {
-    CHECK_CUSPARSE(cusparseDcsrilu02_bufferSize(handle_, n, nz, mat_descr,
-                                                 d_valsILU0, d_row_ptr, d_col_ind,
-                                                 ilu0_info, buffer_size));
-    if (*d_buffer == nullptr) {
-        CHECK_CUDA(cudaMalloc(d_buffer, *buffer_size));
+    if constexpr (P == Precision::Float32) {
+        CHECK_CUSPARSE(cusparseScsrilu02_analysis(handle_, n, nz, mat_descr,
+                                                  d_valsILU0, d_row_ptr, d_col_ind,
+                                                  ilu0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                                  *d_buffer));
+    } else {
+        CHECK_CUSPARSE(cusparseDcsrilu02_analysis(handle_, n, nz, mat_descr,
+                                                  d_valsILU0, d_row_ptr, d_col_ind,
+                                                  ilu0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                                  *d_buffer));
     }
-    CHECK_CUSPARSE(cusparseDcsrilu02_analysis(handle_, n, nz, mat_descr,
-                                              d_valsILU0, d_row_ptr, d_col_ind,
-                                              ilu0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
-                                              *d_buffer));
 }
 
-template<>
-void CUSparseWrapper<Precision::Float64>::ilu0_compute(int n, int nz,
-                                                       cusparseMatDescr_t mat_descr,
-                                                       double* d_valsILU0,
-                                                       const int* d_row_ptr,
-                                                       const int* d_col_ind,
-                                                       csrilu02Info_t ilu0_info,
-                                                       void* d_buffer) {
-    CHECK_CUSPARSE(cusparseDcsrilu02(handle_, n, nz, mat_descr,
-                                     d_valsILU0, d_row_ptr, d_col_ind,
-                                     ilu0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
-                                     d_buffer));
+template<Precision P>
+void CUSparseWrapper<P>::ilu0_compute(int n, int nz,
+                                      cusparseMatDescr_t mat_descr,
+                                      Scalar* d_valsILU0,
+                                      const int* d_row_ptr,
+                                      const int* d_col_ind,
+                                      csrilu02Info_t ilu0_info,
+                                      void* d_buffer) {
+    if constexpr (P == Precision::Float32) {
+        CHECK_CUSPARSE(cusparseScsrilu02(handle_, n, nz, mat_descr,
+                                         d_valsILU0, d_row_ptr, d_col_ind,
+                                         ilu0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                         d_buffer));
+    } else {
+        CHECK_CUSPARSE(cusparseDcsrilu02(handle_, n, nz, mat_descr,
+                                         d_valsILU0, d_row_ptr, d_col_ind,
+                                         ilu0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                         d_buffer));
+    }
 }
 
 template<Precision P>

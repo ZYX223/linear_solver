@@ -14,7 +14,7 @@
 // ============================================================================
 
 template<Precision P>
-SparseMatrix<P>* read_matrix_file(const std::string& filename) {
+std::unique_ptr<SparseMatrix<P>> read_matrix_file(const std::string& filename) {
     std::ifstream file(filename);
     if (!file.is_open()) {
         std::cerr << "错误: 无法打开矩阵文件: " << filename << std::endl;
@@ -24,7 +24,7 @@ SparseMatrix<P>* read_matrix_file(const std::string& filename) {
     int rows, cols, nnz;
     file >> rows >> cols >> nnz;
 
-    SparseMatrix<P>* A = new SparseMatrix<P>(rows, cols, nnz);
+    auto A = std::make_unique<SparseMatrix<P>>(rows, cols, nnz);
 
     using Scalar = typename SparseMatrix<P>::Scalar;
 
@@ -226,7 +226,7 @@ int main(int argc, char** argv) {
 
     // 根据精度分发到不同的实现
     if (prec == Precision::Float32) {
-        SparseMatrix<Precision::Float32>* A = read_matrix_file<Precision::Float32>(matrix_file);
+        auto A = read_matrix_file<Precision::Float32>(matrix_file);
         int n;
         std::vector<float> b = read_rhs_file<Precision::Float32>(rhs_file, n);
 
@@ -237,9 +237,9 @@ int main(int argc, char** argv) {
 
         run_all_tests<Precision::Float32>(*A, b, n, output_dir);
 
-        delete A;
+        // 智能指针自动清理,无需手动 delete
     } else {
-        SparseMatrix<Precision::Float64>* A = read_matrix_file<Precision::Float64>(matrix_file);
+        auto A = read_matrix_file<Precision::Float64>(matrix_file);
         int n;
         std::vector<double> b = read_rhs_file<Precision::Float64>(rhs_file, n);
 
@@ -250,7 +250,7 @@ int main(int argc, char** argv) {
 
         run_all_tests<Precision::Float64>(*A, b, n, output_dir);
 
-        delete A;
+        // 智能指针自动清理,无需手动 delete
     }
 
     print_separator();

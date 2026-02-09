@@ -9,7 +9,7 @@
 - ✅ **单/双精度支持**：完整支持 float32 和 float64，类型安全，零运行时开销
 - ✅ **GPU 加速**：使用 CUDA、cuSPARSE、cuBLAS
 - ✅ **模块化架构**：清晰的分层设计，易于扩展
-- ✅ **现代 C++**：C++14 标准，RAII 资源管理
+- ✅ **现代 C++**：C++17 标准，RAII 资源管理
 - ✅ **完全 RAII**：智能指针自动管理内存，异常安全
 - ✅ **模板化设计**：编译期多态，类型安全
 
@@ -26,17 +26,17 @@
 
 | 方法 | 迭代次数 | 最终残差 | 求解时间 |
 |------|---------|-------------|----------|
-| PCG (CPU) | 130 | 9.27e-07 | 0.429s |
-| PCG (GPU) | 129 | 9.33e-07 | 0.032s |
-| AMG (CPU) | 19 | 9.27e-07 | 0.175s |
+| PCG (CPU) | 130 | 9.27e-07 | 0.579s |
+| PCG (GPU) | 129 | 9.33e-07 | 0.035s |
+| AMG (CPU) | 19 | 9.27e-07 | 0.174s |
 
 ### 双精度
 
 | 方法 | 迭代次数 | 最终残差 | 求解时间 |
 |------|---------|-------------|----------|
-| PCG (CPU) | 129 | 9.08e-07 | 0.430s |
-| PCG (GPU) | 129 | 9.08e-07 | 0.033s |
-| AMG (CPU) | 17 | 8.77e-07 | 0.149s |
+| PCG (CPU) | 129 | 9.08e-07 | 0.517s |
+| PCG (GPU) | 129 | 9.08e-07 | 0.034s |
+| AMG (CPU) | 17 | 8.77e-07 | 0.150s |
 
 
 
@@ -44,6 +44,7 @@
 
 ```
 pcg_solver/
+├── CMakeLists.txt          # 顶层构建配置
 ├── README.md               # 本文件
 │
 ├── include/                # 公共头文件
@@ -69,15 +70,20 @@ pcg_solver/
 │
 └── examples/               # 示例程序
     ├── main.cpp            # 综合测试程序
-    ├── CMakeLists.txt      # CMake 配置
+    ├── CMakeLists.txt      # Examples CMake 配置
     ├── run_test.sh         # 测试脚本（支持精度选择）
     ├── matrix_poisson_P1_14401      # 测试矩阵
     └── matrix_poisson_P1rhs_14401   # 测试右端项
+
+build/                      # 构建目录（编译后生成）
+├── liblinear_solver.a      # 静态库
+└── examples/
+    └── main                # 可执行文件
 ```
 
 ## 依赖
 
-- **CUDA** 12.6（其他版本可能需要调整 `CMakeLists.txt` 中的路径）
+- **CUDA** 12.6（自动检测，也支持其他版本）
 - **cuSPARSE** - 稀疏矩阵运算
 - **cuBLAS** - 向量运算
 - **CMake** >= 3.20
@@ -85,11 +91,11 @@ pcg_solver/
 
 ## 编译
 
-### 基本编译
+### 顶层构建（推荐）
 
 ```bash
-cd examples
-mkdir build && cd build
+# 在项目根目录
+mkdir -p build && cd build
 cmake ..
 make -j$(nproc)
 ```
@@ -99,6 +105,12 @@ make -j$(nproc)
 ```bash
 # Release 模式（优化）
 cmake -DCMAKE_BUILD_TYPE=Release ..
+
+# 指定 CUDA 架构
+cmake -DCMAKE_CUDA_ARCHITECTURES=80 ..
+
+# 指定 CUDA 路径（如果自动检测失败）
+cmake -DCUDAToolkit_ROOT=/usr/local/cuda-12.6 ..
 ```
 
 ## 使用
@@ -121,13 +133,14 @@ cd examples
 ### 2. 直接运行
 
 ```bash
-cd examples/build
+# 在 build/examples 目录
+cd build/examples
 
 # 单精度测试
-./main ../matrix_poisson_P1_14401 ../matrix_poisson_P1rhs_14401 float
+./main ../../examples/matrix_poisson_P1_14401 ../../examples/matrix_poisson_P1rhs_14401 float
 
 # 双精度测试
-./main ../matrix_poisson_P1_14401 ../matrix_poisson_P1rhs_14401 double
+./main ../../examples/matrix_poisson_P1_14401 ../../examples/matrix_poisson_P1rhs_14401 double
 ```
 
 输出示例：
@@ -152,7 +165,71 @@ cd examples/build
   ------------------------------------------------------------------------------------
 ```
 
-### 3. 矩阵文件格式
+### 3. 在其他项目中使用库
+
+有两种方式可以在你的项目中使用 `linear_solver` 库：
+
+---
+
+#### 方式一：add_subdirectory
+
+适合开发阶段，自动处理所有依赖：
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(my_project LANGUAGES CXX CUDA)
+
+# 设置 linear_solver 路径（可从命令行覆盖）
+set(LINEAR_SOLVER_ROOT "/path/to/linear_solver" CACHE PATH "Path to linear_solver")
+
+# 添加 linear_solver 为子目录（自动处理头文件和依赖）
+set(BUILD_EXAMPLES OFF CACHE BOOL "Build examples" FORCE)
+add_subdirectory(${LINEAR_SOLVER_ROOT} ${CMAKE_BINARY_DIR}/linear_solver)
+
+# 创建可执行文件
+add_executable(my_app main.cpp)
+
+# 链接 linear_solver（自动包含 CUDA 库）
+target_link_libraries(my_app PRIVATE linear_solver)
+```
+
+#### 方式二：预编译库
+
+适合部署和生产环境，编译速度快：
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(my_project LANGUAGES CXX)
+
+# 设置 linear_solver 路径（可从命令行覆盖）
+set(LINEAR_SOLVER_ROOT "/path/to/linear_solver" CACHE PATH "Path to linear_solver")
+
+# 查找预编译的静态库
+find_library(LINEAR_SOLVER_LIB
+    NAMES liblinear_solver.a
+    PATHS
+        ${LINEAR_SOLVER_ROOT}/build
+        ${LINEAR_SOLVER_ROOT}/build/Release
+        ${LINEAR_SOLVER_ROOT}/build/Debug
+    NO_DEFAULT_PATH
+)
+
+# 创建可执行文件
+add_executable(my_app main.cpp)
+
+# 手动指定头文件
+target_include_directories(my_app PRIVATE ${LINEAR_SOLVER_ROOT}/include)
+
+# 链接预编译的静态库
+target_link_libraries(my_app PRIVATE ${LINEAR_SOLVER_LIB})
+
+# 查找并链接 CUDA 库（必须）
+find_package(CUDAToolkit REQUIRED)
+target_link_libraries(my_app PRIVATE CUDA::cusparse CUDA::cublas CUDA::cudart)
+```
+
+
+### 4. 矩阵文件格式
 
 **矩阵文件**：
 ```
@@ -379,10 +456,3 @@ solver.set_preconditioner(std::make_shared<MyGPUPreconditioner>());
 1. 实现后端特定的向量运算
 2. 使用 `Backend` 枚举添加新选项
 3. 在 `solve()` 方法中添加分支
-
-
-## 参考文献
-
-1. Saad, Y. (2003). *Iterative Methods for Sparse Linear Systems*
-2. Briggs, W. L., Henson, V. E., & McCormick, S. F. (2000). *A Multigrid Tutorial*
-3. Stuben, K. (2001). Algebraic multigrid (AMG): An introduction with applications

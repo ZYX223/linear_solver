@@ -1,7 +1,4 @@
-#include "../include/pcg_solver.h"
-#include "../include/amg_solver.h"
-#include "../include/preconditioner.h"
-#include "../include/precision_traits.h"
+#include "../include/solvers.h"
 #include <iostream>
 #include <iomanip>
 #include <fstream>

@@ -38,9 +38,15 @@ if [ ! -f "$RHS_FILE" ]; then
 fi
 
 # 检查可执行文件
-if [ ! -f "./build/main" ]; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MAIN_EXEC="$SCRIPT_DIR/../build/examples/main"
+
+if [ ! -f "$MAIN_EXEC" ]; then
     echo "错误: 找不到可执行文件 main!"
-    echo "请运行: cd build && cmake .. && make"
+    echo "请先构建项目:"
+    echo "  cd $SCRIPT_DIR/../build"
+    echo "  cmake .."
+    echo "  make -j\$(nproc)"
     exit 1
 fi
 
@@ -57,24 +63,24 @@ if [ "$PRECISION" = "float" ]; then
     echo "=========================================="
     echo "单精度测试"
     echo "=========================================="
-    ./build/main "$MATRIX_FILE" "$RHS_FILE" float
+    "$MAIN_EXEC" "$MATRIX_FILE" "$RHS_FILE" float
 elif [ "$PRECISION" = "double" ]; then
     echo "=========================================="
     echo "双精度测试"
     echo "=========================================="
-    ./build/main "$MATRIX_FILE" "$RHS_FILE" double
+    "$MAIN_EXEC" "$MATRIX_FILE" "$RHS_FILE" double
 else
     echo "=========================================="
     echo "单精度测试"
     echo "=========================================="
-    ./build/main "$MATRIX_FILE" "$RHS_FILE" float
+    "$MAIN_EXEC" "$MATRIX_FILE" "$RHS_FILE" float
 
     echo ""
     echo ""
     echo "=========================================="
     echo "双精度测试"
     echo "=========================================="
-    ./build/main "$MATRIX_FILE" "$RHS_FILE" double
+    "$MAIN_EXEC" "$MATRIX_FILE" "$RHS_FILE" double
 fi
 
 echo ""

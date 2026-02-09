@@ -4,28 +4,9 @@
 #include "precision_traits.h"
 #include "sparse_utils.h"
 #include "preconditioner.h"
+#include "solve_stats.h"
 #include <memory>
 #include <vector>
-
-// ============================================================================
-// PCG 求解器统计信息
-// ============================================================================
-
-struct SolveStats {
-    int iterations;
-    double final_residual;  // 改为double以适应两种精度
-    bool converged;
-    double solve_time;      // 求解时间（秒）
-};
-
-// ============================================================================
-// 后端类型
-// ============================================================================
-
-enum Backend {
-    BACKEND_GPU,
-    BACKEND_CPU
-};
 
 // ============================================================================
 // PCG 求解器配置

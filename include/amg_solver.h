@@ -3,7 +3,7 @@
 
 #include "precision_traits.h"
 #include "sparse_utils.h"
-#include "pcg_solver.h"
+#include "solve_stats.h"
 #include <memory>
 #include <vector>
 

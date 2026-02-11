@@ -46,10 +46,6 @@ set(LIB_SOURCES
     src/sparse_utils.cpp
     src/preconditioner.cpp
     src/pcg_solver.cpp
-    src/amg_relaxation.cpp
-    src/amg_coarsening.cpp
-    src/amg_interpolation.cpp
-    src/amg_hierarchy.cpp
     src/amg_solver.cpp
 )
 

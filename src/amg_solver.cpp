@@ -1,8 +1,108 @@
 #include "amg_solver.h"
-#include "amg_hierarchy.h"
-#include "sparse_utils.h"
 #include <chrono>
-#include <cmath>
+#include <iostream>
+#include <stdexcept>
+#include <amgcl/backend_builtin.hpp>
+#include <amgcl/make_solver.hpp>
+#include <amgcl/amg.hpp>
+#include <amgcl/coarsening_smoothed_aggregation.hpp>
+#include <amgcl/relaxation_gauss_seidel.hpp>
+#include <amgcl/solver_cg.hpp>
+
+// ============================================================================
+// AMGCL 求解器的实现（使用类型擦除避免头文件暴露 amgcl）
+// ============================================================================
+
+namespace {
+
+// 模板化的实现类
+template<Precision P>
+class AMGSolverImplTyped : public AMGSolverImplBase {
+public:
+    using Scalar = PRECISION_SCALAR(P);
+
+    explicit AMGSolverImplTyped(const AMGConfig& config)
+        : config_(config), setup_done_(false) {}
+
+    void setup(const void* A, Precision precision) override {
+        if (precision != P) {
+            throw std::runtime_error("AMGSolver: precision mismatch");
+        }
+
+        const auto& mat = *static_cast<const SparseMatrix<P>*>(A);
+
+        // 转换矩阵到 amgcl 格式
+        size_t n = mat.rows;
+        ptr_.resize(n + 1);
+        col_.resize(mat.nnz);
+        val_.resize(mat.nnz);
+
+        for (size_t i = 0; i <= n; ++i) {
+            ptr_[i] = static_cast<ptrdiff_t>(mat.row_ptr[i]);
+        }
+        for (size_t i = 0; i < mat.nnz; ++i) {
+            col_[i] = static_cast<ptrdiff_t>(mat.col_ind[i]);
+            val_[i] = static_cast<Scalar>(mat.values[i]);
+        }
+
+        // 创建 amgcl 后端矩阵
+        A_amgcl_ = std::make_shared<BackendMatrix>(n, n, ptr_, col_, val_);
+
+        // 配置求解器
+        typename Solver::params prm;
+        prm.precond.coarsening.aggr.eps_strong = static_cast<float>(config_.aggregation_eps);
+
+        // 创建求解器
+        solver_ = std::make_unique<Solver>(*A_amgcl_, prm);
+        setup_done_ = true;
+    }
+
+    std::pair<int, double> solve(const void* b, void* x, Precision precision) override {
+        if (precision != P) {
+            throw std::runtime_error("AMGSolver: precision mismatch");
+        }
+
+        if (!setup_done_) {
+            throw std::runtime_error("AMGSolver: setup() must be called before solve()");
+        }
+
+        const auto& rhs = *static_cast<const std::vector<Scalar>*>(b);
+        auto& sol = *static_cast<std::vector<Scalar>*>(x);
+
+        // amgcl 返回 std::tuple<size_t, Scalar>
+        auto result = (*solver_)(*A_amgcl_, rhs, sol);
+        size_t iters = std::get<0>(result);
+        double error = static_cast<double>(std::get<1>(result));
+        return {static_cast<int>(iters), error};
+    }
+
+private:
+    AMGConfig config_;
+    bool setup_done_;
+
+    // amgcl 类型定义
+    typedef amgcl::backend::builtin<Scalar> Backend;
+    typedef typename Backend::matrix BackendMatrix;
+
+    typedef amgcl::make_solver<
+        amgcl::amg<
+            Backend,
+            amgcl::coarsening::smoothed_aggregation,
+            amgcl::relaxation::gauss_seidel
+        >,
+        amgcl::solver::cg<Backend>
+    > Solver;
+
+    std::unique_ptr<Solver> solver_;
+    std::shared_ptr<BackendMatrix> A_amgcl_;
+
+    // 适配后的矩阵数据（amgcl 使用 ptrdiff_t）
+    std::vector<ptrdiff_t> ptr_;
+    std::vector<ptrdiff_t> col_;
+    std::vector<Scalar> val_;
+};
+
+} // anonymous namespace
 
 // ============================================================================
 // AMGSolver 模板实现
@@ -10,78 +110,54 @@
 
 template<Precision P>
 AMGSolver<P>::AMGSolver(const AMGConfig& config)
-    : config_(config), hierarchy_(nullptr) {
+    : config_(config),
+      impl_(std::make_unique<AMGSolverImplTyped<P>>(config)) {
 }
 
 template<Precision P>
-AMGSolver<P>::~AMGSolver() {
-    // 智能指针自动清理
-}
+AMGSolver<P>::~AMGSolver() = default;
 
 template<Precision P>
-SolveStats AMGSolver<P>::solve(const SparseMatrix<P>& A,
-                                const std::vector<Scalar>& b,
-                                std::vector<Scalar>& x) {
-    return solve_cpu(A, b, x);
-}
-
-template<Precision P>
-void AMGSolver<P>::compute_residual(const Matrix& A, const Vector& x,
-                                     const Vector& b, Vector& r) {
-    CPUOps::spmv<P>(A.rows, A.row_ptr, A.col_ind, A.values, x, r);
-    for (int i = 0; i < A.rows; ++i) {
-        r[i] = b[i] - r[i];
-    }
-}
-
-template<Precision P>
-SolveStats AMGSolver<P>::solve_cpu(const Matrix& A, const Vector& b, Vector& x) {
-    int n = A.rows;
-
-    // 构建层次结构
-    if (!hierarchy_) {
-        hierarchy_ = std::make_unique<AMGHierarchy<P>>();
-        hierarchy_->setup(A, config_);
-    }
+SolveStats AMGSolver<P>::solve(const Matrix& A, const Vector& b, Vector& x) {
+    // 设置求解器
+    impl_->setup(&A, P);
 
     // 初始化解向量
+    int n = A.rows;
     if (x.size() != static_cast<size_t>(n)) {
         x.resize(n, Scalar(0));
     }
 
-    // 计算初始残差
-    Vector r(n);
-    compute_residual(A, x, b, r);
-    double r0_norm = std::sqrt(CPUOps::dot<P>(r, r));
-
-    int k = 0;
+    // 计时开始
     auto start = std::chrono::high_resolution_clock::now();
 
-    // 主迭代循环
-    while (k < config_.max_iterations) {
-        // 执行V-cycle
-        hierarchy_->cycle(b, x, 0, config_);
+    // 求解
+    int iters;
+    double error;
+    std::tie(iters, error) = impl_->solve(&b, &x, P);
 
-        // 计算残差
-        compute_residual(A, x, b, r);
-        double r_norm = std::sqrt(CPUOps::dot<P>(r, r));
-
-        // 检查收敛
-        if (r_norm / r0_norm < config_.tolerance) {
-            break;
-        }
-
-        k++;
-    }
-
+    // 计时结束
     auto end = std::chrono::high_resolution_clock::now();
     double solve_time = std::chrono::duration<double>(end - start).count();
 
     // 准备统计信息
     SolveStats stats;
-    stats.iterations = k;
-    stats.final_residual = std::sqrt(CPUOps::dot<P>(r, r)) / r0_norm;
-    stats.converged = (k <= config_.max_iterations);
+    stats.iterations = iters;
+    stats.converged = (iters < config_.max_iterations);
+
+    // 计算相对残差 ||b - Ax|| / ||b||
+    Vector ax(n);
+    CPUOps::spmv<P>(n, A.row_ptr, A.col_ind, A.values, x, ax);
+
+    double r_norm = 0;
+    double b_norm = 0;
+    for (int i = 0; i < n; ++i) {
+        Scalar r = b[i] - ax[i];
+        r_norm += static_cast<double>(r * r);
+        b_norm += static_cast<double>(b[i] * b[i]);
+    }
+
+    stats.final_residual = std::sqrt(r_norm) / b_norm;
     stats.solve_time = solve_time;
 
     return stats;

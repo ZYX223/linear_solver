@@ -155,10 +155,10 @@ void run_amg_test(const std::string& name,
                   const std::string& output_dir) {
     AMGConfig config;
     config.max_iterations = 100;
-    config.tolerance = 1e-6;
+    config.tolerance = 1e-8;
     config.precision = P;
     config.max_levels = 10;
-    config.coarse_grid_size = 50;
+    config.coarse_grid_size = 500;
     config.pre_smooth_steps = 1;
     config.post_smooth_steps = 1;
 

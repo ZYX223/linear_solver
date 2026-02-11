@@ -12,10 +12,18 @@
 // PCG 求解器配置
 // ============================================================================
 
+// 预条件子类型枚举
+enum class PreconditionerType {
+    NONE,   // 无预条件（纯 CG）
+    JACOBI, // 对角预条件
+    ILU0    // 不完全 LU 分解
+};
+
 struct PCGConfig {
     int max_iterations = 1000;
     double tolerance = 1e-12;         // 使用double
     bool use_preconditioner = false;  // 默认关闭预处理
+    PreconditionerType preconditioner_type = PreconditionerType::ILU0;  // 预条件子类型
     Backend backend = BACKEND_GPU;    // 默认使用 GPU
     Precision precision = Precision::Float32;  // 新增：精度选择
 };

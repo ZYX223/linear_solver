@@ -14,6 +14,6 @@
 
 // 所有求解器
 #include "pcg_solver.h"
-#include "amg_solver.h"
+#include "amg_solver.h"  // AMG 求解器（基于 amgcl 库）
 
 #endif // SOLVERS_H

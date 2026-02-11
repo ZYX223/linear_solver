@@ -1,6 +1,8 @@
 #pragma once
+#ifndef __CPU_ONLY__
 #include <cuda_runtime.h>
 #include <cusparse.h>
+#endif
 #include <type_traits>
 
 // ============================================================================

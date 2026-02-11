@@ -111,7 +111,20 @@ SolveStats PCGSolver<P>::solve_gpu(const SparseMatrix<P>& A,
     d_buffer_spMV_.reset(buffer);
 
     if (config_.use_preconditioner && !preconditioner_) {
-        preconditioner_ = std::make_shared<GPUILUPreconditioner<P>>(sparse_);
+        switch (config_.preconditioner_type) {
+            case PreconditionerType::ILU0:
+                preconditioner_ = std::make_shared<GPUILUPreconditioner<P>>(sparse_);
+                break;
+            case PreconditionerType::JACOBI:
+            case PreconditionerType::NONE:
+                // 对角预条件或无预条件，不需要设置
+                break;
+            default:
+                // 对于未实现的预条件子类型，回退到 ILU0
+                std::cerr << "Warning: Unsupported preconditioner type, falling back to ILU0" << std::endl;
+                preconditioner_ = std::make_shared<GPUILUPreconditioner<P>>(sparse_);
+                break;
+        }
     }
 
     if (preconditioner_) {

@@ -2,9 +2,11 @@
 #define SPARSE_UTILS_H
 
 #include "precision_traits.h"
+#ifndef __CPU_ONLY__
 #include <cuda_runtime.h>
 #include <cusparse.h>
 #include <cublas_v2.h>
+#endif
 #include <vector>
 #include <memory>
 #include <type_traits>

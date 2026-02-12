@@ -12,12 +12,7 @@
 // PCG 求解器配置
 // ============================================================================
 
-// 预条件子类型枚举
-enum class PreconditionerType {
-    NONE,   // 无预条件（纯 CG）
-    JACOBI, // 对角预条件
-    ILU0    // 不完全 LU 分解
-};
+// 预条件子类型定义已移至 preconditioner.h
 
 struct PCGConfig {
     int max_iterations = 1000;
@@ -26,6 +21,7 @@ struct PCGConfig {
     PreconditionerType preconditioner_type = PreconditionerType::ILU0;  // 预条件子类型
     Backend backend = BACKEND_GPU;    // 默认使用 GPU
     Precision precision = Precision::Float32;  // 新增：精度选择
+    std::shared_ptr<AMGConfig> amg_config = nullptr;  // AMG 预条件子配置
 };
 
 // ============================================================================
@@ -40,12 +36,10 @@ public:
     using Matrix = SparseMatrix<P>;
     using GPUVectorType = GPUVector<P>;
     using GPUPrec = PreconditionerBase<P, GPUVector<P>>;
+    using CPUPrec = PreconditionerBase<P, std::vector<Scalar>>;
 
     PCGSolver(const PCGConfig& config);
     ~PCGSolver();
-
-    // 设置预处理器（仅 GPU）
-    void set_preconditioner(std::shared_ptr<GPUPrec> prec);
 
     // 求解 Ax = b
     SolveStats solve(const Matrix& A, const Vector& b, Vector& x);
@@ -65,7 +59,7 @@ private:
     // GPU 后端成员
     std::unique_ptr<CUBLASWrapper<P>> blas_;
     std::shared_ptr<CUSparseWrapper<P>> sparse_;
-    std::shared_ptr<GPUPrec> preconditioner_;
+    std::shared_ptr<GPUPrec> gpu_preconditioner_;  // GPU 预条件子
     std::unique_ptr<GPUVector<P>> d_r_;
     std::unique_ptr<GPUVector<P>> d_z_;
     std::unique_ptr<GPUVector<P>> d_rm2_;
@@ -76,7 +70,7 @@ private:
     size_t buffer_spMV_size_;
 
     // CPU 后端成员
-    std::unique_ptr<CPUILUPreconditioner<P>> cpu_ilu_prec_;
+    std::unique_ptr<CPUPrec> cpu_preconditioner_;  // CPU 预条件子
 
     // 方法
     void allocate_workspace(int n);

@@ -35,7 +35,7 @@ THE SOFTWARE.
 #include <numeric>
 
 #include <amgcl/util.hpp>
-#include <amgcl/backend_builtin.hpp>
+#include <amgcl/backend/builtin.hpp>
 
 namespace amgcl {
 namespace coarsening {

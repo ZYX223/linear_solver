@@ -1,5 +1,5 @@
-#ifndef AMGCL_SOLVER_DETAIL_DEFAULT_INNER_PRODUCT_HPP
-#define AMGCL_SOLVER_DETAIL_DEFAULT_INNER_PRODUCT_HPP
+#ifndef AMGCL_COARSENING_DETAIL_GALERKIN_HPP
+#define AMGCL_COARSENING_DETAIL_GALERKIN_HPP
 
 /*
 The MIT License
@@ -26,36 +26,28 @@ THE SOFTWARE.
 */
 
 /**
- * \file   amgcl/solver/detail/default_inner_product.hpp
+ * \file   amgcl/coarsening/detail/galerkin.hpp
  * \author Denis Demidov <dennis.demidov@gmail.com>
- * \brief  Default inner product getter for iterative solvers.
- *
- * Falls through to backend::inner_product().
+ * \brief  Galerkin operator.
  */
 
-#include <amgcl/backend_interface.hpp>
+#include <memory>
+#include <amgcl/backend/builtin.hpp>
 
 namespace amgcl {
-namespace solver {
+namespace coarsening {
 namespace detail {
 
-struct default_inner_product {
-    template <class Vec1, class Vec2>
-    typename math::inner_product_impl<
-        typename backend::value_type<Vec1>::type
-    >::return_type
-    operator()(const Vec1 &x, const Vec2 &y) const {
-        return backend::inner_product(x, y);
-    }
-
-    int rank() const {
-        return 0;
-    }
-};
+template <class Matrix>
+std::shared_ptr<Matrix> galerkin(
+        const Matrix &A, const Matrix &P, const Matrix &R
+        )
+{
+    return product(R, *product(A, P));
+}
 
 } // namespace detail
-} // namespace solver
+} // namespace coarsening
 } // namespace amgcl
-
 
 #endif

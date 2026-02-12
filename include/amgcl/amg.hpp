@@ -36,8 +36,8 @@ THE SOFTWARE.
 #include <list>
 #include <memory>
 
-#include <amgcl/backend_builtin.hpp>
-#include <amgcl/solver_detail_default_inner_product.hpp>
+#include <amgcl/backend/builtin.hpp>
+#include <amgcl/solver/detail/default_inner_product.hpp>
 #include <amgcl/util.hpp>
 
 /// Primary namespace.

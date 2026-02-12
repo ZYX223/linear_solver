@@ -11,6 +11,8 @@
 template<Precision P>
 PCGSolver<P>::PCGSolver(const PCGConfig& config)
     : config_(config),
+      gpu_preconditioner_(),  // GPU 预条件子（显式初始化为 nullptr）
+      cpu_preconditioner_(nullptr),  // CPU 预条件子（显式初始化为 nullptr）
       d_buffer_spMV_(nullptr), buffer_spMV_size_(0) {
 
     backend_ = config.backend;
@@ -24,13 +26,6 @@ PCGSolver<P>::PCGSolver(const PCGConfig& config)
 template<Precision P>
 PCGSolver<P>::~PCGSolver() {
     free_workspace();
-}
-
-template<Precision P>
-void PCGSolver<P>::set_preconditioner(std::shared_ptr<typename PCGSolver<P>::GPUPrec> prec) {
-    if (backend_ == BACKEND_GPU) {
-        preconditioner_ = prec;
-    }
 }
 
 template<Precision P>
@@ -110,10 +105,14 @@ SolveStats PCGSolver<P>::solve_gpu(const SparseMatrix<P>& A,
     CHECK_CUDA(cudaMalloc(&buffer, buffer_spMV_size_));
     d_buffer_spMV_.reset(buffer);
 
-    if (config_.use_preconditioner && !preconditioner_) {
+    if (config_.use_preconditioner && !gpu_preconditioner_) {
         switch (config_.preconditioner_type) {
             case PreconditionerType::ILU0:
-                preconditioner_ = std::make_shared<GPUILUPreconditioner<P>>(sparse_);
+                gpu_preconditioner_ = std::make_shared<GPUILUPreconditioner<P>>(sparse_);
+                break;
+            case PreconditionerType::AMG:
+                // AMG 预条件子
+                gpu_preconditioner_ = std::make_shared<GPUAMGPreconditioner<P>>(sparse_, config_.amg_config);
                 break;
             case PreconditionerType::JACOBI:
             case PreconditionerType::NONE:
@@ -122,13 +121,13 @@ SolveStats PCGSolver<P>::solve_gpu(const SparseMatrix<P>& A,
             default:
                 // 对于未实现的预条件子类型，回退到 ILU0
                 std::cerr << "Warning: Unsupported preconditioner type, falling back to ILU0" << std::endl;
-                preconditioner_ = std::make_shared<GPUILUPreconditioner<P>>(sparse_);
+                gpu_preconditioner_ = std::make_shared<GPUILUPreconditioner<P>>(sparse_);
                 break;
         }
     }
 
-    if (preconditioner_) {
-        preconditioner_->setup(A);
+    if (gpu_preconditioner_) {
+        gpu_preconditioner_->setup(A);
     }
 
     GPUVector<P> d_x(n);
@@ -144,8 +143,8 @@ SolveStats PCGSolver<P>::solve_gpu(const SparseMatrix<P>& A,
     auto start = std::chrono::high_resolution_clock::now();
 
     while (r1 > tol * tol && k < max_iter) {
-        if (preconditioner_) {
-            preconditioner_->apply(*d_r_, *d_z_);
+        if (gpu_preconditioner_) {
+            gpu_preconditioner_->apply(*d_r_, *d_z_);
         } else {
             blas_->copy(n, d_r_->d_data, d_z_->d_data);
         }
@@ -214,9 +213,24 @@ SolveStats PCGSolver<P>::solve_cpu(const SparseMatrix<P>& A,
     std::vector<typename PCGSolver<P>::Scalar> rm2(n);
     std::vector<typename PCGSolver<P>::Scalar> zm2(n);
 
+    // 设置预条件子（循环外一次性设置）
     if (config_.use_preconditioner) {
-        cpu_ilu_prec_ = std::make_unique<CPUILUPreconditioner<P>>();
-        cpu_ilu_prec_->setup(A.rows, A.row_ptr, A.col_ind, A.values);
+        switch (config_.preconditioner_type) {
+            case PreconditionerType::AMG:
+                cpu_preconditioner_ = std::make_unique<CPUAMGPreconditioner<P>>(config_.amg_config);
+                cpu_preconditioner_->setup(A);
+                break;
+            case PreconditionerType::ILU0:
+                cpu_preconditioner_ = std::make_unique<CPUILUPreconditioner<P>>();
+                cpu_preconditioner_->setup(A);
+                break;
+            case PreconditionerType::JACOBI:
+            case PreconditionerType::NONE:
+                // Jacobi 预条件或无预条件，不需要设置
+                break;
+            default:
+                break;
+        }
     }
 
     r = b;
@@ -225,8 +239,8 @@ SolveStats PCGSolver<P>::solve_cpu(const SparseMatrix<P>& A,
     auto start = std::chrono::high_resolution_clock::now();
 
     while (r1 > tol * tol && k < max_iter) {
-        if (config_.use_preconditioner && cpu_ilu_prec_) {
-            cpu_ilu_prec_->apply(r, z);
+        if (cpu_preconditioner_) {
+            cpu_preconditioner_->apply(r, z);
         } else {
             z = r;
         }

@@ -3,9 +3,30 @@
 
 #include "sparse_utils.h"
 #include "precision_traits.h"
+#include "amg_config.h"
 #include <cusparse.h>
 #include <memory>
 #include <vector>
+
+// amgcl 库头文件（在 AMG 预条件子类型定义之前）
+#include <amgcl/backend/builtin.hpp>
+#include <amgcl/backend/cuda.hpp>
+#include <amgcl/amg.hpp>
+#include <amgcl/coarsening/smoothed_aggregation.hpp>
+#include <amgcl/relaxation/gauss_seidel.hpp>  // CPU AMG
+#include <amgcl/relaxation/damped_jacobi.hpp> // GPU AMG
+
+// ============================================================================
+// 预条件子类型定义
+// ============================================================================
+
+/// 预条件子类型
+enum class PreconditionerType {
+    NONE,     // 无预条件（纯 CG）
+    JACOBI,   // 对角预条件
+    ILU0,     // 不完全 LU 分解
+    AMG        // 代数多重网格（自动选择 CPU 或 GPU 后端）
+};
 
 // ============================================================================
 // 预处理器模板基类（统一 CPU/GPU 接口）
@@ -107,5 +128,90 @@ private:
     void forward_substitute(const Vector& b, Vector& y) const;
     void backward_substitute(const Vector& y, Vector& x) const;
 };
+
+// ============================================================================
+// CPU AMG 预条件子
+// ============================================================================
+
+template<Precision P>
+class CPUAMGPreconditioner : public PreconditionerBase<P, std::vector<PRECISION_SCALAR(P)>> {
+public:
+    using Scalar = PRECISION_SCALAR(P);
+    using Vector = std::vector<Scalar>;
+    using Matrix = SparseMatrix<P>;
+
+    explicit CPUAMGPreconditioner(std::shared_ptr<AMGConfig> config);
+    ~CPUAMGPreconditioner() override = default;
+
+    void setup(const Matrix& A) override;
+    void apply(const Vector& r, Vector& z) const override;
+
+private:
+    std::shared_ptr<AMGConfig> config_;
+
+    // amgcl 类型定义（使用编译时类型，无需 Boost）
+    typedef amgcl::backend::builtin<Scalar> Backend;
+    typedef amgcl::amg<
+        Backend,
+        amgcl::coarsening::smoothed_aggregation,
+        amgcl::relaxation::gauss_seidel
+    > AMGPreconditioner;
+
+    std::shared_ptr<typename Backend::matrix> A_amgcl_;
+    std::shared_ptr<AMGPreconditioner> amg_prec_;
+
+    // 适配后的矩阵数据（amgcl 使用 ptrdiff_t）
+    std::vector<ptrdiff_t> ptr_;
+    std::vector<ptrdiff_t> col_;
+    std::vector<Scalar> val_;
+
+    bool is_setup_;
+};
+
+// ============================================================================
+// GPU AMG 预条件子
+// ============================================================================
+
+#ifndef __CPU_ONLY__
+
+template<Precision P>
+class GPUAMGPreconditioner : public PreconditionerBase<P, GPUVector<P>> {
+public:
+    using Scalar = PRECISION_SCALAR(P);
+    using Vector = GPUVector<P>;
+    using Matrix = SparseMatrix<P>;
+
+    GPUAMGPreconditioner(std::shared_ptr<CUSparseWrapper<P>> sparse,
+                          std::shared_ptr<AMGConfig> config);
+    ~GPUAMGPreconditioner() override = default;
+
+    void setup(const Matrix& A) override;
+    void apply(const Vector& r, Vector& z) const override;
+
+private:
+    std::shared_ptr<CUSparseWrapper<P>> sparse_;
+    std::shared_ptr<AMGConfig> config_;
+
+    // amgcl 类型定义（使用编译时类型，无需 Boost）
+    typedef amgcl::backend::builtin<Scalar> BackendHost;
+    typedef amgcl::backend::cuda<Scalar> BackendDevice;
+    typedef amgcl::amg<
+        BackendDevice,
+        amgcl::coarsening::smoothed_aggregation,
+        amgcl::relaxation::damped_jacobi
+    > AMGPreconditioner;
+
+    std::shared_ptr<typename BackendHost::matrix> A_host_;
+    std::shared_ptr<AMGPreconditioner> amg_prec_;
+
+    // 适配后的矩阵数据
+    std::vector<ptrdiff_t> ptr_;
+    std::vector<ptrdiff_t> col_;
+    std::vector<Scalar> val_;
+
+    bool is_setup_;
+};
+
+#endif // __CPU_ONLY__
 
 #endif // PRECONDITIONER_H

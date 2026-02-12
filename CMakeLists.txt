@@ -16,7 +16,8 @@ if(NOT DEFINED CMAKE_CUDA_COMPILER)
 endif()
 
 # CUDA 架构（必须在 project() 之前设置）
-set(CMAKE_CUDA_ARCHITECTURES 75)
+# 设置为 native 以自动检测当前 GPU 的架构
+set(CMAKE_CUDA_ARCHITECTURES native)
 
 project(linear_solver VERSION 1.0.0 LANGUAGES CXX CUDA)
 
@@ -44,7 +45,8 @@ option(ENABLE_CUDA "Enable CUDA support" ON)
 # 库源文件
 set(LIB_SOURCES
     src/sparse_utils.cpp
-    src/preconditioner.cpp
+    src/preconditioner.cpp       # CPU 预条件子 (g++ 编译)
+    src/preconditioner_cuda.cu # GPU 预条件子 (nvcc 编译)
     src/pcg_solver.cpp
     src/amg_solver.cpp
 )
@@ -52,11 +54,17 @@ set(LIB_SOURCES
 # 创建静态库
 add_library(linear_solver STATIC ${LIB_SOURCES})
 
-# 公共头文件目录
+# 公共头文件目录（amgcl 已包含在 include/amgcl/ 中）
 target_include_directories(linear_solver PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
+
+# 禁用 Boost 依赖（使用编译时参数配置）
+# amgcl 的 Boost 依赖仅用于运行时参数配置
+# 本项目使用 AMGConfig 结构体，不需要运行时配置
+message(STATUS "Boost disabled. Using compile-time AMG configuration.")
+target_compile_definitions(linear_solver PRIVATE AMGCL_NO_BOOST)
 
 # CUDA 相关设置（如果找到 CUDA）
 if(CUDAToolkit_FOUND)

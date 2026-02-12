@@ -38,10 +38,10 @@ THE SOFTWARE.
 #include <tuple>
 #include <memory>
 
-#include <amgcl/backend_builtin.hpp>
-#include <amgcl/coarsening_detail_galerkin.hpp>
-#include <amgcl/coarsening_pointwise_aggregates.hpp>
-#include <amgcl/coarsening_tentative_prolongation.hpp>
+#include <amgcl/backend/builtin.hpp>
+#include <amgcl/coarsening/detail/galerkin.hpp>
+#include <amgcl/coarsening/pointwise_aggregates.hpp>
+#include <amgcl/coarsening/tentative_prolongation.hpp>
 #include <amgcl/util.hpp>
 
 namespace amgcl {

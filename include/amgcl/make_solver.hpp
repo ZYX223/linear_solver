@@ -32,7 +32,7 @@ THE SOFTWARE.
  */
 
 #include <type_traits>
-#include <amgcl/backend_builtin.hpp>
+#include <amgcl/backend/builtin.hpp>
 #include <amgcl/util.hpp>
 
 namespace amgcl {

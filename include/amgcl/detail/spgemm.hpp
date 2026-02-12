@@ -50,9 +50,9 @@ THE SOFTWARE.
 #include <omp.h>
 #endif
 
-#include <amgcl/backend_interface.hpp>
-#include <amgcl/value_type_interface.hpp>
-#include <amgcl/detail_sort_row.hpp>
+#include <amgcl/backend/interface.hpp>
+#include <amgcl/value_type/interface.hpp>
+#include <amgcl/detail/sort_row.hpp>
 
 namespace amgcl {
 namespace backend {

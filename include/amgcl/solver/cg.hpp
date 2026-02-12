@@ -34,8 +34,8 @@ THE SOFTWARE.
 #include <tuple>
 #include <iostream>
 
-#include <amgcl/backend_interface.hpp>
-#include <amgcl/solver_detail_default_inner_product.hpp>
+#include <amgcl/backend/interface.hpp>
+#include <amgcl/solver/detail/default_inner_product.hpp>
 #include <amgcl/util.hpp>
 
 namespace amgcl {

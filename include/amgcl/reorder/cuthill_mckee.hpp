@@ -69,7 +69,7 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <vector>
 #include <algorithm>
 
-#include <amgcl/backend_interface.hpp>
+#include <amgcl/backend/interface.hpp>
 #include <amgcl/util.hpp>
 
 namespace amgcl {

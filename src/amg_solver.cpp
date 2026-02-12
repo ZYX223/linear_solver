@@ -2,12 +2,12 @@
 #include <chrono>
 #include <iostream>
 #include <stdexcept>
-#include <amgcl/backend_builtin.hpp>
+#include <amgcl/backend/builtin.hpp>
 #include <amgcl/make_solver.hpp>
 #include <amgcl/amg.hpp>
-#include <amgcl/coarsening_smoothed_aggregation.hpp>
-#include <amgcl/relaxation_gauss_seidel.hpp>
-#include <amgcl/solver_cg.hpp>
+#include <amgcl/coarsening/smoothed_aggregation.hpp>
+#include <amgcl/relaxation/gauss_seidel.hpp>
+#include <amgcl/solver/cg.hpp>
 
 // ============================================================================
 // AMGCL 求解器的实现（使用类型擦除避免头文件暴露 amgcl）

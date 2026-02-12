@@ -175,11 +175,56 @@ void run_amg_test(const std::string& name,
     save_solution<P>(filename, x);
 }
 
+// ============================================================================
+// PCG + AMG 预条件子测试（CPU 和 GPU）
+// ============================================================================
+
+template<Precision P>
+void run_pcg_amg_test(const std::string& name, Backend backend,
+                      const SparseMatrix<P>& A,
+                      const std::vector<typename ScalarType<P>::type>& b, int n,
+                      const std::string& output_dir) {
+    PCGConfig config;
+    config.max_iterations = 1000;
+    config.tolerance = 1e-6;
+    config.use_preconditioner = true;
+    config.backend = backend;
+
+    // 设置 AMG 预条件子配置
+    config.amg_config = std::make_shared<AMGConfig>();
+    config.amg_config->max_levels = 10;
+    config.amg_config->coarse_grid_size = 500;
+    config.amg_config->aggregation_eps = 0.001;
+
+    // 统一使用 AMG（自动根据后端选择 CPU 或 GPU 实现）
+    config.preconditioner_type = PreconditionerType::AMG;
+
+    using Scalar = typename ScalarType<P>::type;
+    std::vector<Scalar> x(n, ScalarConstants<P>::zero());
+
+    PCGSolver<P> solver(config);
+    SolveStats stats = solver.solve(A, b, x);
+    print_stats_line(name, stats);
+
+    // 保存解向量
+    std::string precision_str = (P == Precision::Float32) ? "float" : "double";
+    std::string backend_str = (backend == BACKEND_CPU) ? "cpu" : "gpu";
+    std::string filename = output_dir + "/solution_" + name + "_" + backend_str + "_" + precision_str + ".dat";
+    save_solution<P>(filename, x);
+}
+
 template<Precision P>
 void run_all_tests(const SparseMatrix<P>& A, const std::vector<typename ScalarType<P>::type>& b, int n,
                    const std::string& output_dir) {
-    run_pcg_test<P>("PCG (CPU)", BACKEND_CPU, true, A, b, n, output_dir);
-    run_pcg_test<P>("PCG (GPU)", BACKEND_GPU, true, A, b, n, output_dir);
+    // PCG + ILU0 测试
+    run_pcg_test<P>("PCG+ILU0 (CPU)", BACKEND_CPU, true, A, b, n, output_dir);
+    run_pcg_test<P>("PCG+ILU0 (GPU)", BACKEND_GPU, true, A, b, n, output_dir);
+
+    // PCG + AMG 测试
+    run_pcg_amg_test<P>("PCG+AMG (CPU)", BACKEND_CPU, A, b, n, output_dir);
+    run_pcg_amg_test<P>("PCG+AMG (GPU)", BACKEND_GPU, A, b, n, output_dir);
+
+    // 独立 AMG 求解器测试（用于对比）
     run_amg_test<P>("AMG (CPU)", A, b, n, output_dir);
 }
 

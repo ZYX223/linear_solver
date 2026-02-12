@@ -1,6 +1,12 @@
 #include "preconditioner.h"
 #include <stdio.h>
 
+#ifndef __CPU_ONLY__
+#include <thrust/device_ptr.h>
+#include <thrust/device_vector.h>
+#include <thrust/copy.h>
+#endif
+
 // ============================================================================
 // GPUILUPreconditioner 模板实现
 // ============================================================================
@@ -234,6 +240,65 @@ void CPUILUPreconditioner<P>::backward_substitute(const std::vector<typename CPU
 }
 
 // ============================================================================
+// CPU AMG 预条件子实现
+// ============================================================================
+
+template<Precision P>
+CPUAMGPreconditioner<P>::CPUAMGPreconditioner(std::shared_ptr<AMGConfig> config)
+    : config_(config), is_setup_(false) {
+    if (!config_) {
+        config_ = std::make_shared<AMGConfig>();
+    }
+}
+
+template<Precision P>
+void CPUAMGPreconditioner<P>::setup(const SparseMatrix<P>& A) {
+    // 转换矩阵到 amgcl 格式（参考 amg_solver.cpp）
+    size_t n = A.rows;
+    size_t nnz = A.nnz;
+
+    ptr_.resize(n + 1);
+    col_.resize(nnz);
+    val_.resize(nnz);
+
+    for (size_t i = 0; i <= n; ++i) {
+        ptr_[i] = static_cast<ptrdiff_t>(A.row_ptr[i]);
+    }
+    for (size_t i = 0; i < nnz; ++i) {
+        col_[i] = static_cast<ptrdiff_t>(A.col_ind[i]);
+        val_[i] = static_cast<Scalar>(A.values[i]);
+    }
+
+    // 创建 amgcl 后端矩阵
+    A_amgcl_ = std::make_shared<typename Backend::matrix>(n, n, ptr_, col_, val_);
+
+    // 配置 AMG 参数
+    typename AMGPreconditioner::params prm;
+    prm.coarsening.aggr.eps_strong = static_cast<float>(config_->aggregation_eps);
+    prm.max_levels = config_->max_levels;
+    prm.coarse_enough = config_->coarse_grid_size;
+    prm.npre = config_->pre_smooth_steps;
+    prm.npost = config_->post_smooth_steps;
+
+    // 创建 AMG 预条件子
+    amg_prec_ = std::make_shared<AMGPreconditioner>(*A_amgcl_, prm);
+
+    is_setup_ = true;
+}
+
+template<Precision P>
+void CPUAMGPreconditioner<P>::apply(const std::vector<PRECISION_SCALAR(P)>& r,
+                                      std::vector<PRECISION_SCALAR(P)>& z) const {
+    if (!is_setup_) {
+        printf("Error: CPUAMGPreconditioner not setup!\n");
+        exit(1);
+    }
+
+    // 调用 amgcl 预条件子 (AMG V-cycle)
+    amg_prec_->apply(r, z);
+}
+
+// ============================================================================
 // 显式模板实例化
 // ============================================================================
 
@@ -242,3 +307,9 @@ template class GPUILUPreconditioner<Precision::Float64>;
 
 template class CPUILUPreconditioner<Precision::Float32>;
 template class CPUILUPreconditioner<Precision::Float64>;
+
+template class CPUAMGPreconditioner<Precision::Float32>;
+template class CPUAMGPreconditioner<Precision::Float64>;
+
+// 注意：GPU AMG 预条件子的实现和模板实例化已移到 src/preconditioner_cuda.cu
+// 该文件由 NVCC 编译，解决了 Thrust 兼容性问题

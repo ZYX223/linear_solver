@@ -35,7 +35,7 @@ THE SOFTWARE.
 
 #include <memory>
 
-#include <amgcl/backend_interface.hpp>
+#include <amgcl/backend/interface.hpp>
 #include <amgcl/util.hpp>
 
 #ifdef _OPENMP

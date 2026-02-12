@@ -35,8 +35,8 @@ THE SOFTWARE.
 #include <cmath>
 
 #include <amgcl/util.hpp>
-#include <amgcl/backend_builtin.hpp>
-#include <amgcl/coarsening_plain_aggregates.hpp>
+#include <amgcl/backend/builtin.hpp>
+#include <amgcl/coarsening/plain_aggregates.hpp>
 
 namespace amgcl {
 namespace coarsening {

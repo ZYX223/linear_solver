@@ -42,12 +42,12 @@ THE SOFTWARE.
 #endif
 
 #include <amgcl/util.hpp>
-#include <amgcl/backend_interface.hpp>
-#include <amgcl/solver_skyline_lu.hpp>
-#include <amgcl/detail_inverse.hpp>
-#include <amgcl/detail_sort_row.hpp>
-#include <amgcl/detail_spgemm.hpp>
-#include <amgcl/backend_detail_matrix_ops.hpp>
+#include <amgcl/backend/interface.hpp>
+#include <amgcl/solver/skyline_lu.hpp>
+#include <amgcl/detail/inverse.hpp>
+#include <amgcl/detail/sort_row.hpp>
+#include <amgcl/detail/spgemm.hpp>
+#include <amgcl/backend/detail/matrix_ops.hpp>
 
 namespace amgcl {
 namespace backend {

@@ -49,7 +49,7 @@ THE SOFTWARE.
 #  include <boost/property_tree/ptree.hpp>
 #endif
 
-#include <amgcl/io_ios_saver.hpp>
+#include <amgcl/io/ios_saver.hpp>
 
 /* Performance measurement macros
  *

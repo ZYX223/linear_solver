@@ -36,7 +36,7 @@ THE SOFTWARE.
 #include <numeric>
 #include <utility>
 #include <amgcl/util.hpp>
-#include <amgcl/value_type_interface.hpp>
+#include <amgcl/value_type/interface.hpp>
 
 namespace amgcl {
 namespace detail {

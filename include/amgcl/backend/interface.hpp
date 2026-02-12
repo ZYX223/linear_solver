@@ -35,7 +35,7 @@ THE SOFTWARE.
 
 #include <type_traits>
 
-#include <amgcl/value_type_interface.hpp>
+#include <amgcl/value_type/interface.hpp>
 #include <amgcl/util.hpp>
 
 namespace amgcl {

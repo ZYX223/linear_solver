@@ -36,8 +36,8 @@ THE SOFTWARE.
 
 #include <memory>
 
-#include <amgcl/backend_builtin.hpp>
-#include <amgcl/detail_qr.hpp>
+#include <amgcl/backend/builtin.hpp>
+#include <amgcl/detail/qr.hpp>
 
 namespace amgcl {
 namespace coarsening {

@@ -32,8 +32,8 @@ THE SOFTWARE.
  */
 
 #include <type_traits>
-#include <amgcl/backend_interface.hpp>
-#include <amgcl/value_type_interface.hpp>
+#include <amgcl/backend/interface.hpp>
+#include <amgcl/value_type/interface.hpp>
 
 namespace amgcl {
 namespace backend {

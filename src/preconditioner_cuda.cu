@@ -3,6 +3,7 @@
 #include <iostream>
 #include <algorithm>
 #include <vector>
+#include <cuda_runtime.h>
 
 // ============================================================================
 // GPU AMG 预条件子实现
@@ -64,18 +65,21 @@ template<Precision P>
 void GPUAMGPreconditioner<P>::apply(const GPUVector<P>& r, GPUVector<P>& z) const {
     if (!is_setup_) return;
 
-    // 将原始指针数据复制到 thrust::device_vector
-    thrust::copy(thrust::device_pointer_cast(r.d_data),
-                 thrust::device_pointer_cast(r.d_data + n_),
-                 r_dev_.begin());
+    // 使用 cudaMemcpy 进行设备内存拷贝
+    // r -> r_dev_
+    cudaMemcpy(thrust::raw_pointer_cast(r_dev_.data()),
+               r.d_data,
+               n_ * sizeof(Scalar),
+               cudaMemcpyDeviceToDevice);
 
     // 应用 amgcl CUDA 预条件子（完全在 GPU 上执行）
     amg_prec_->apply(r_dev_, z_dev_);
 
-    // 将结果从 thrust::device_vector 复制回原始指针
-    thrust::copy(z_dev_.begin(),
-                 z_dev_.end(),
-                 thrust::device_pointer_cast(z.d_data));
+    // z_dev_ -> z
+    cudaMemcpy(z.d_data,
+               thrust::raw_pointer_cast(z_dev_.data()),
+               n_ * sizeof(Scalar),
+               cudaMemcpyDeviceToDevice);
 }
 
 // ============================================================================

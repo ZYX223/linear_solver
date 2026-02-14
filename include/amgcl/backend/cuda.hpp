@@ -47,6 +47,14 @@ THE SOFTWARE.
 #include <thrust/inner_product.h>
 #include <cusparse_v2.h>
 
+// 抑制 cuSPARSE 废弃 API 警告 (csrilu02Info_t, cusparseDestroyCsrilu02Info 等)
+// 这些 API 在 CUDA 12.x 中已废弃，但 amgcl 库仍在使用它们
+// TODO: 等待 amgcl 库更新以支持新的 cusparseSpSM API
+#if defined(__GNUC__) || defined(__clang__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 namespace amgcl {
 
 namespace solver {
@@ -814,5 +822,10 @@ struct cuda_clock {
 
 } // namespace backend
 } // namespace amgcl
+
+// 恢复废弃 API 警告
+#if defined(__GNUC__) || defined(__clang__)
+    #pragma GCC diagnostic pop
+#endif
 
 #endif

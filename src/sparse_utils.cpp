@@ -86,6 +86,8 @@ void CUSparseWrapper<P>::spmv(cusparseSpMatDescr_t matA,
 }
 
 // 使用 if constexpr 消除 ILU0 精度特化重复代码
+// 注意: ILU0/IC0 相关 API 在 CUDA 12.x 中已废弃
+CUSPARSE_DEPRECATED_DISABLE_BEGIN
 template<Precision P>
 void CUSparseWrapper<P>::ilu0_setup(int n, int nz,
                                     cusparseMatDescr_t mat_descr,
@@ -139,6 +141,62 @@ void CUSparseWrapper<P>::ilu0_compute(int n, int nz,
                                          d_buffer));
     }
 }
+
+// IC(0) 分解实现
+template<Precision P>
+void CUSparseWrapper<P>::ic0_setup(int n, int nz,
+                                   cusparseMatDescr_t mat_descr,
+                                   Scalar* d_valsIC0,
+                                   const int* d_row_ptr,
+                                   const int* d_col_ind,
+                                   csric02Info_t ic0_info,
+                                   void** d_buffer, int* buffer_size) {
+    if constexpr (P == Precision::Float32) {
+        CHECK_CUSPARSE(cusparseScsric02_bufferSize(handle_, n, nz, mat_descr,
+                                                   d_valsIC0, d_row_ptr, d_col_ind,
+                                                   ic0_info, buffer_size));
+    } else {
+        CHECK_CUSPARSE(cusparseDcsric02_bufferSize(handle_, n, nz, mat_descr,
+                                                   d_valsIC0, d_row_ptr, d_col_ind,
+                                                   ic0_info, buffer_size));
+    }
+    if (*d_buffer == nullptr) {
+        CHECK_CUDA(cudaMalloc(d_buffer, *buffer_size));
+    }
+    if constexpr (P == Precision::Float32) {
+        CHECK_CUSPARSE(cusparseScsric02_analysis(handle_, n, nz, mat_descr,
+                                                 d_valsIC0, d_row_ptr, d_col_ind,
+                                                 ic0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                                 *d_buffer));
+    } else {
+        CHECK_CUSPARSE(cusparseDcsric02_analysis(handle_, n, nz, mat_descr,
+                                                 d_valsIC0, d_row_ptr, d_col_ind,
+                                                 ic0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                                 *d_buffer));
+    }
+}
+
+template<Precision P>
+void CUSparseWrapper<P>::ic0_compute(int n, int nz,
+                                     cusparseMatDescr_t mat_descr,
+                                     Scalar* d_valsIC0,
+                                     const int* d_row_ptr,
+                                     const int* d_col_ind,
+                                     csric02Info_t ic0_info,
+                                     void* d_buffer) {
+    if constexpr (P == Precision::Float32) {
+        CHECK_CUSPARSE(cusparseScsric02(handle_, n, nz, mat_descr,
+                                        d_valsIC0, d_row_ptr, d_col_ind,
+                                        ic0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                        d_buffer));
+    } else {
+        CHECK_CUSPARSE(cusparseDcsric02(handle_, n, nz, mat_descr,
+                                        d_valsIC0, d_row_ptr, d_col_ind,
+                                        ic0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                        d_buffer));
+    }
+}
+CUSPARSE_DEPRECATED_DISABLE_END
 
 template<Precision P>
 void CUSparseWrapper<P>::triangular_solve_setup(cusparseSpMatDescr_t matM,

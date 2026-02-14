@@ -26,7 +26,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # CUDA 编译选项
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O2")
+# 使用 CMAKE_CUDA_FLAGS_RELEASE 而不是直接修改 CMAKE_CUDA_FLAGS
+# 避免与 CMake 默认优化选项冲突导致 "incompatible redefinition for option 'optimize'" 警告
+set(CMAKE_CUDA_FLAGS_RELEASE "-O3")
+set(CMAKE_CUDA_FLAGS_DEBUG "-g -G")
 
 # 查找 CUDA 库
 find_package(CUDAToolkit QUIET)

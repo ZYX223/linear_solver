@@ -11,6 +11,26 @@
 #include <memory>
 #include <type_traits>
 
+// 抑制 cuSPARSE 废弃 API 警告 (csrilu02Info_t, csric02Info_t 等)
+// 这些 API 在 CUDA 12.x 中已废弃，但仍在工作
+// TODO: 未来迁移到 cusparseSpSV/cusparseSpSM 通用 API
+#if defined(__GNUC__) || defined(__clang__)
+    #define CUSPARSE_DEPRECATED_DISABLE_BEGIN \
+        _Pragma("GCC diagnostic push") \
+        _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+    #define CUSPARSE_DEPRECATED_DISABLE_END \
+        _Pragma("GCC diagnostic pop")
+#elif defined(_MSC_VER)
+    #define CUSPARSE_DEPRECATED_DISABLE_BEGIN \
+        __pragma(warning(push)) \
+        __pragma(warning(disable: 4996))
+    #define CUSPARSE_DEPRECATED_DISABLE_END \
+        __pragma(warning(pop))
+#else
+    #define CUSPARSE_DEPRECATED_DISABLE_BEGIN
+    #define CUSPARSE_DEPRECATED_DISABLE_END
+#endif
+
 #define CHECK_CUDA(val) do { \
     cudaError_t err = (val); \
     if (err != cudaSuccess) { \
@@ -80,7 +100,9 @@ public:
               cusparseDnVecDescr_t vecY,
               Scalar alpha, Scalar beta, void* buffer);
 
-    // ILU(0)分解
+    // ILU(0)分解 (使用废弃 API，已在 CUDA 12.x 中标记为废弃)
+    // NOLINTBEGIN(modernize-deprecated-headers)
+    CUSPARSE_DEPRECATED_DISABLE_BEGIN
     void ilu0_setup(int n, int nz,
                     cusparseMatDescr_t mat_descr,
                     Scalar* d_valsILU0,
@@ -96,6 +118,25 @@ public:
                       const int* d_col_ind,
                       csrilu02Info_t ilu0_info,
                       void* d_buffer);
+
+    // IC(0)分解（不完全 Cholesky）
+    void ic0_setup(int n, int nz,
+                   cusparseMatDescr_t mat_descr,
+                   Scalar* d_valsIC0,
+                   const int* d_row_ptr,
+                   const int* d_col_ind,
+                   csric02Info_t ic0_info,
+                   void** d_buffer, int* buffer_size);
+
+    void ic0_compute(int n, int nz,
+                     cusparseMatDescr_t mat_descr,
+                     Scalar* d_valsIC0,
+                     const int* d_row_ptr,
+                     const int* d_col_ind,
+                     csric02Info_t ic0_info,
+                     void* d_buffer);
+    CUSPARSE_DEPRECATED_DISABLE_END
+    // NOLINTEND(modernize-deprecated-headers)
 
     // 三角求解: y = alpha * M^(-1) * x (其中M是L或U)
     void triangular_solve_setup(cusparseSpMatDescr_t matM,

@@ -9,6 +9,9 @@
 #include <memory>
 #include <vector>
 
+// 抑制 cuSPARSE 废弃 API 警告 (csrilu02Info_t 等)
+// 这些宏定义在 sparse_utils.h 中
+
 // amgcl 库头文件（在 AMG 预条件子类型定义之前）
 #include <amgcl/backend/builtin.hpp>
 #include <amgcl/backend/cuda.hpp>
@@ -26,7 +29,8 @@ enum class PreconditionerType {
     NONE,     // 无预条件（纯 CG）
     JACOBI,   // 对角预条件
     ILU0,     // 不完全 LU 分解
-    AMG        // 代数多重网格（自动选择 CPU 或 GPU 后端）
+    IC0,      // 不完全 Cholesky 分解（对称正定矩阵专用）
+    AMG       // 代数多重网格（自动选择 CPU 或 GPU 后端）
 };
 
 // ============================================================================
@@ -73,7 +77,9 @@ private:
 
     // 矩阵描述符
     cusparseMatDescr_t matLU_descr_;
+    CUSPARSE_DEPRECATED_DISABLE_BEGIN
     csrilu02Info_t ilu0_info_;
+    CUSPARSE_DEPRECATED_DISABLE_END
 
     // ILU(0) buffer
     void* d_bufferILU0_;
@@ -93,6 +99,58 @@ private:
 
     // 辅助向量（用于L和U之间的中间结果）
     Scalar* d_y_;
+
+    bool is_setup_;
+};
+
+// ============================================================================
+// GPU IC(0) 预处理器（不完全 Cholesky 分解）
+// 实现：CPU 分解得到上三角 R + GPU 三角求解
+// 使用 NVIDIA 推荐方式：R^T * R 分解，用 TRANSPOSE 操作避免显式构建 R^T
+// ============================================================================
+
+template<Precision P>
+class GPUIPCPreconditioner : public PreconditionerBase<P, GPUVector<P>> {
+public:
+    using Scalar = PRECISION_SCALAR(P);
+    using Matrix = SparseMatrix<P>;
+    using Vector = GPUVector<P>;
+
+    GPUIPCPreconditioner(std::shared_ptr<CUSparseWrapper<P>> sparse);
+    ~GPUIPCPreconditioner();
+
+    void setup(const Matrix& A) override;
+    void apply(const Vector& r, Vector& z) const override;
+
+private:
+    std::shared_ptr<CUSparseWrapper<P>> sparse_;
+
+    int rows_;
+    int nnz_;
+
+    // 上三角 R 因子（CSR 格式，CPU 端用于分解）
+    std::vector<int> row_ptr_;
+    std::vector<int> col_ind_;
+    std::vector<Scalar> values_;
+
+    // GPU 端数据（只有一个 R 矩阵）
+    int* d_row_ptr_;
+    int* d_col_ind_;
+    Scalar* d_values_;
+
+    // R 矩阵描述符（用于 R^T 和 R 的三角求解）
+    cusparseSpMatDescr_t matR_;
+
+    // 三角求解描述符和 buffer
+    cusparseSpSVDescr_t spsvDescrRt_;  // R^T 求解（TRANSPOSE）
+    cusparseSpSVDescr_t spsvDescrR_;   // R 求解（NON_TRANSPOSE）
+    void* d_bufferRt_;
+    void* d_bufferR_;
+    size_t bufferSizeRt_;
+    size_t bufferSizeR_;
+
+    // 辅助向量
+    Scalar* d_t_;
 
     bool is_setup_;
 };
@@ -125,6 +183,33 @@ private:
     std::vector<int> row_ptr_;
     std::vector<int> col_ind_;
     std::vector<Scalar> values_;  // ILU(0) 分解后的值
+
+    void forward_substitute(const Vector& b, Vector& y) const;
+    void backward_substitute(const Vector& y, Vector& x) const;
+};
+
+// ============================================================================
+// CPU IC(0) 预处理器（不完全 Cholesky 分解，对称正定矩阵专用）
+// ============================================================================
+
+template<Precision P>
+class CPUIPCPreconditioner : public PreconditionerBase<P, std::vector<PRECISION_SCALAR(P)>> {
+public:
+    using Scalar = PRECISION_SCALAR(P);
+    using Matrix = SparseMatrix<P>;
+    using Vector = std::vector<Scalar>;
+
+    CPUIPCPreconditioner();
+    ~CPUIPCPreconditioner() override = default;
+
+    void setup(const Matrix& A) override;
+    void apply(const Vector& r, Vector& z) const override;
+
+private:
+    int n_;
+    std::vector<int> row_ptr_;
+    std::vector<int> col_ind_;
+    std::vector<Scalar> values_;  // IC(0) 分解后的 L 因子（下三角）
 
     void forward_substitute(const Vector& b, Vector& y) const;
     void backward_substitute(const Vector& y, Vector& x) const;

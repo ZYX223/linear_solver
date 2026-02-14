@@ -76,8 +76,32 @@ private:
     void allocate_workspace(int n);
     void free_workspace();
 
+    // 统一预条件子管理
+    void setup_gpu_preconditioner(const Matrix& A);
+    void setup_cpu_preconditioner(const Matrix& A);
+
     SolveStats solve_gpu(const Matrix& A, const Vector& b, Vector& x);
     SolveStats solve_cpu(const Matrix& A, const Vector& b, Vector& x);
+
+    // ============================================================================
+    // PCG 核心算法
+    // ============================================================================
+
+    // GPU 版本的核心算法
+    SolveStats solve_core_gpu(
+        int n,
+        const Matrix& A,
+        const Vector& b,
+        Vector& x,
+        const cusparseSpMatDescr_t matA,
+        void* spmv_buffer);
+
+    // CPU 版本的核心算法
+    SolveStats solve_core_cpu(
+        int n,
+        const Matrix& A,
+        const Vector& b,
+        Vector& x);
 };
 
 // ============================================================================

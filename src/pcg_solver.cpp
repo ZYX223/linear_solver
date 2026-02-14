@@ -131,16 +131,18 @@ SolveStats PCGSolver<P>::solve_gpu(const SparseMatrix<P>& A,
     }
 
     GPUVector<P> d_x(n);
-    d_x.upload_from_host(x.data());
-    d_r_->upload_from_host(b.data());
-
-    typename PCGSolver<P>::Scalar r1 = blas_->dot(n, d_r_->d_data, d_r_->d_data);
+    d_x.upload_from_host(x.data());  // 初始解 x = 0
+    d_r_->upload_from_host(b.data());  // 初始残差 r = b
 
     int k = 0;
     const double tol = config_.tolerance;
     const int max_iter = config_.max_iterations;
 
     auto start = std::chrono::high_resolution_clock::now();
+
+    // 计算初始残差范数平方
+    typename PCGSolver<P>::Scalar r1 = blas_->dot(n, d_r_->d_data, d_r_->d_data);
+    // printf("[GPU PCG] Initial: ||r|| = %.6e, tolerance = %.1e\n", std::sqrt(r1), tol);
 
     while (r1 > tol * tol && k < max_iter) {
         if (gpu_preconditioner_) {
@@ -190,7 +192,9 @@ SolveStats PCGSolver<P>::solve_gpu(const SparseMatrix<P>& A,
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecR));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecZ));
 
-    return create_stats(k, r1, k <= max_iter, solve_time);
+    // 计算最终残差
+    double final_residual = std::sqrt(r1);
+    return create_stats(k, final_residual, r1 <= tol * tol, solve_time);
 }
 
 // ============================================================================
@@ -233,7 +237,7 @@ SolveStats PCGSolver<P>::solve_cpu(const SparseMatrix<P>& A,
         }
     }
 
-    r = b;
+    r = b;  // 初始残差 r = b
     typename PCGSolver<P>::Scalar r1 = CPUOps::dot<P>(r, r);
 
     auto start = std::chrono::high_resolution_clock::now();
@@ -271,13 +275,15 @@ SolveStats PCGSolver<P>::solve_cpu(const SparseMatrix<P>& A,
 
         CPUOps::axpy<P>(-alpha, Ap, r);
 
+        // 计算当前残差范数（用于循环条件检查）
         r1 = CPUOps::dot<P>(r, r);
     }
 
     auto end = std::chrono::high_resolution_clock::now();
     double solve_time = std::chrono::duration<double>(end - start).count();
 
-    return create_stats(k, r1, k <= max_iter, solve_time);
+    double final_residual = std::sqrt(r1);
+    return create_stats(k, final_residual, r1 <= tol * tol, solve_time);
 }
 
 // ============================================================================

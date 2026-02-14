@@ -50,7 +50,23 @@ public:
 
         // 配置求解器
         typename Solver::params prm;
+
+        // AMG 预条件子参数
         prm.precond.coarsening.aggr.eps_strong = static_cast<float>(config_.aggregation_eps);
+        prm.precond.npre = config_.pre_smooth_steps;
+        prm.precond.coarsening.aggr.block_size = config_.block_size;
+        prm.precond.npost = config_.post_smooth_steps;
+        prm.precond.ncycle = config_.ncycle;
+        prm.precond.pre_cycles = config_.pre_cycles;
+        prm.precond.direct_coarse = config_.direct_coarse;
+
+        // AMG 层级参数
+        prm.precond.max_levels = config_.max_levels;
+        prm.precond.coarse_enough = config_.coarse_grid_size;
+
+        // CG 求解器参数
+        prm.solver.tol = static_cast<Scalar>(config_.tolerance);
+        prm.solver.maxiter = config_.max_iterations;
 
         // 创建求解器
         solver_ = std::make_unique<Solver>(*A_amgcl_, prm);
@@ -122,10 +138,13 @@ SolveStats AMGSolver<P>::solve(const Matrix& A, const Vector& b, Vector& x) {
     // 设置求解器
     impl_->setup(&A, P);
 
-    // 初始化解向量
+    // 初始化解向量（总是清零，与 test_amgcl 保持一致）
     int n = A.rows;
     if (x.size() != static_cast<size_t>(n)) {
         x.resize(n, Scalar(0));
+    } else {
+        // 大小正确时也要清零，确保初始值为 0
+        std::fill(x.begin(), x.end(), Scalar(0));
     }
 
     // 计时开始
@@ -143,7 +162,7 @@ SolveStats AMGSolver<P>::solve(const Matrix& A, const Vector& b, Vector& x) {
     // 准备统计信息
     SolveStats stats;
     stats.iterations = iters;
-    stats.converged = (iters < config_.max_iterations);
+    stats.converged = (error < config_.tolerance);  // 使用实际残差判断收敛
 
     // 计算相对残差 ||b - Ax|| / ||b||
     Vector ax(n);
@@ -157,7 +176,7 @@ SolveStats AMGSolver<P>::solve(const Matrix& A, const Vector& b, Vector& x) {
         b_norm += static_cast<double>(b[i] * b[i]);
     }
 
-    stats.final_residual = std::sqrt(r_norm) / b_norm;
+    stats.final_residual = std::sqrt(r_norm) / std::sqrt(b_norm);
     stats.solve_time = solve_time;
 
     return stats;

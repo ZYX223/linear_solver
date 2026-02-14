@@ -5,6 +5,7 @@
 #include "precision_traits.h"
 #include "amg_config.h"
 #include <cusparse.h>
+#include <thrust/device_vector.h>
 #include <memory>
 #include <vector>
 
@@ -14,7 +15,7 @@
 #include <amgcl/amg.hpp>
 #include <amgcl/coarsening/smoothed_aggregation.hpp>
 #include <amgcl/relaxation/gauss_seidel.hpp>  // CPU AMG
-#include <amgcl/relaxation/damped_jacobi.hpp> // GPU AMG
+#include <amgcl/relaxation/damped_jacobi.hpp> // GPU AMG (Jacobi)
 
 // ============================================================================
 // 预条件子类型定义
@@ -170,6 +171,7 @@ private:
 
 // ============================================================================
 // GPU AMG 预条件子
+// 使用 AMGCL 原生 CUDA 后端 + Damped Jacobi 松弛
 // ============================================================================
 
 #ifndef __CPU_ONLY__
@@ -183,7 +185,7 @@ public:
 
     GPUAMGPreconditioner(std::shared_ptr<CUSparseWrapper<P>> sparse,
                           std::shared_ptr<AMGConfig> config);
-    ~GPUAMGPreconditioner() override = default;
+    ~GPUAMGPreconditioner() override;
 
     void setup(const Matrix& A) override;
     void apply(const Vector& r, Vector& z) const override;
@@ -192,22 +194,34 @@ private:
     std::shared_ptr<CUSparseWrapper<P>> sparse_;
     std::shared_ptr<AMGConfig> config_;
 
-    // amgcl 类型定义（使用编译时类型，无需 Boost）
-    typedef amgcl::backend::builtin<Scalar> BackendHost;
-    typedef amgcl::backend::cuda<Scalar> BackendDevice;
+    // 使用 CUDA backend + Damped Jacobi（GPU 友好的松弛方法）
+    typedef amgcl::backend::cuda<Scalar> Backend;
     typedef amgcl::amg<
-        BackendDevice,
+        Backend,
         amgcl::coarsening::smoothed_aggregation,
         amgcl::relaxation::damped_jacobi
     > AMGPreconditioner;
 
-    std::shared_ptr<typename BackendHost::matrix> A_host_;
+    // CPU端矩阵用于构建层级（amgcl在构建时使用builtin格式）
+    typedef amgcl::backend::builtin<Scalar> BuildBackend;
+    std::shared_ptr<typename BuildBackend::matrix> A_build_;
     std::shared_ptr<AMGPreconditioner> amg_prec_;
 
-    // 适配后的矩阵数据
+    // Backend 参数（cusparse handle）
+    typename Backend::params backend_params_;
+
+    // 矩阵维度
+    int n_ = 0;
+    int nnz_ = 0;
+
+    // 适配后的矩阵数据（用于构建阶段）
     std::vector<ptrdiff_t> ptr_;
     std::vector<ptrdiff_t> col_;
     std::vector<Scalar> val_;
+
+    // GPU 端向量（thrust::device_vector，用于 amgcl CUDA 后端）
+    mutable thrust::device_vector<Scalar> r_dev_;
+    mutable thrust::device_vector<Scalar> z_dev_;
 
     bool is_setup_;
 };

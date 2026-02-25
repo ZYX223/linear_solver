@@ -1,5 +1,6 @@
 #include "preconditioner.h"
 #include <stdio.h>
+#include <unordered_map>
 
 // 注意: GPUILUPreconditioner 的实现已移至 preconditioner_cuda.cu
 
@@ -112,8 +113,7 @@ void CPUILUPreconditioner<P>::backward_substitute(const std::vector<typename CPU
 
 // ============================================================================
 // CPUIPCPreconditioner 模板实现（不完全 Cholesky 分解）
-// 实现：A ≈ R^T * R，其中 R 是上三角矩阵
-// 参考：NVIDIA cuSPARSE White Paper
+// 实现：A ≈ L * L^T，其中 L 是下三角矩阵（直接存储，无需转置）
 // ============================================================================
 
 template<Precision P>
@@ -126,106 +126,168 @@ void CPUIPCPreconditioner<P>::setup(const SparseMatrix<P>& A) {
     using Scalar = typename CPUIPCPreconditioner<P>::Scalar;
 
     // ========================================================================
-    // Step 1: 提取上三角部分
+    // Step 1: 提取下三角部分（包括对角线）并构建 L 的 CSR 结构
     // ========================================================================
-    row_ptr_.resize(n_ + 1, 0);
+    l_row_ptr_.resize(n_ + 1, 0);
 
-    // 统计每行上三角元素数量（包括对角线）
+    // 统计每行下三角元素数量
     for (int i = 0; i < n_; i++) {
         int count = 0;
         for (int j = A.row_ptr[i]; j < A.row_ptr[i + 1]; j++) {
-            if (A.col_ind[j] >= i) count++;  // 上三角：col >= row
+            if (A.col_ind[j] <= i) count++;  // 下三角：col <= row
         }
-        row_ptr_[i + 1] = row_ptr_[i] + count;
+        l_row_ptr_[i + 1] = l_row_ptr_[i] + count;
     }
 
-    int nnz = row_ptr_[n_];
-    col_ind_.resize(nnz);
-    values_.resize(nnz);
+    int l_nnz = l_row_ptr_[n_];
+    l_col_ind_.resize(l_nnz);
+    l_values_.resize(l_nnz);
 
-    // 填充上三角部分
+    // 填充下三角部分
     for (int i = 0; i < n_; i++) {
-        int idx = row_ptr_[i];
+        int idx = l_row_ptr_[i];
         for (int j = A.row_ptr[i]; j < A.row_ptr[i + 1]; j++) {
-            if (A.col_ind[j] >= i) {
-                col_ind_[idx] = A.col_ind[j];
-                values_[idx] = A.values[j];
+            if (A.col_ind[j] <= i) {
+                l_col_ind_[idx] = A.col_ind[j];
+                l_values_[idx] = A.values[j];
                 idx++;
             }
         }
     }
 
     // ========================================================================
-    // Step 2: IC(0) 分解: A ≈ R^T * R
-    // R 是上三角，按行计算
-    // 对于 col >= row 的元素 R[row,col]:
-    //   R[row,col] = (A[row,col] - sum_{k<row} R[k,row] * R[k,col]) / R[row,row]  (row < col)
-    //   R[row,row] = sqrt(A[row,row] - sum_{k<row} R[k,row]^2)                    (row == col)
+    // Step 2: 构建列索引映射（用于 IC 分解）
     // ========================================================================
+    std::vector<std::unordered_map<int, int>> col_map(n_);
     for (int row = 0; row < n_; row++) {
-        // 找到 R[row,row] 在 values_ 中的索引
-        int diag_idx = -1;
-        for (int j = row_ptr_[row]; j < row_ptr_[row + 1]; j++) {
-            if (col_ind_[j] == row) {
-                diag_idx = j;
-                break;
-            }
+        for (int j = l_row_ptr_[row]; j < l_row_ptr_[row + 1]; j++) {
+            col_map[row][l_col_ind_[j]] = j;
         }
+    }
 
-        // 先计算对角线 R[row,row]
-        Scalar sum_sq = ScalarConstants<P>::zero();
-        for (int k = 0; k < row; k++) {
-            // 找 R[k,row]
-            Scalar r_k_row = ScalarConstants<P>::zero();
-            for (int j = row_ptr_[k]; j < row_ptr_[k + 1]; j++) {
-                if (col_ind_[j] == row) {
-                    r_k_row = values_[j];
-                    break;
-                }
-            }
-            sum_sq += r_k_row * r_k_row;
+    // ========================================================================
+    // Step 3: 构建列到行的反向映射
+    // ========================================================================
+    std::vector<std::vector<int>> col_rows(n_);
+    for (int k = 0; k < n_; k++) {
+        for (int j = l_row_ptr_[k]; j < l_row_ptr_[k + 1]; j++) {
+            int col = l_col_ind_[j];
+            col_rows[col].push_back(k);
         }
+    }
 
-        Scalar diag_val = values_[diag_idx] - sum_sq;
-        if (diag_val > ScalarConstants<P>::zero()) {
-            values_[diag_idx] = std::sqrt(diag_val);
-        } else {
-            // 数值保护
-            values_[diag_idx] = std::sqrt(std::fabs(diag_val) + 1e-12);
-        }
+    // ========================================================================
+    // Step 4: IC(0) 分解: A ≈ L * L^T
+    // L[row,col] 对于 col <= row:
+    //   L[row,col] = (A[row,col] - sum_{k<col} L[row,k] * L[col,k]) / L[col,col]  (col < row)
+    //   L[row,row] = sqrt(A[row,row] - sum_{k<row} L[row,k]^2)                    (col == row)
+    // ========================================================================
+    diag_.resize(n_);
 
-        Scalar r_row_row = values_[diag_idx];
+    for (int row = 0; row < n_; row++) {
+        // 找到 L[row,row] 的索引
+        auto it_diag = col_map[row].find(row);
+        if (it_diag == col_map[row].end()) continue;
+        int diag_idx = it_diag->second;
 
-        // 计算非对角线元素 R[row,col] (col > row)
-        for (int j_idx = diag_idx + 1; j_idx < row_ptr_[row + 1]; j_idx++) {
-            int col = col_ind_[j_idx];
+        // 计算非对角线元素 L[row,col] (col < row)
+        for (int j_idx = l_row_ptr_[row]; j_idx < diag_idx; j_idx++) {
+            int col = l_col_ind_[j_idx];
 
-            // sum_{k<row} R[k,row] * R[k,col]
             Scalar sum_prod = ScalarConstants<P>::zero();
-            for (int k = 0; k < row; k++) {
-                // 找 R[k,row]
-                Scalar r_k_row = ScalarConstants<P>::zero();
-                for (int j = row_ptr_[k]; j < row_ptr_[k + 1]; j++) {
-                    if (col_ind_[j] == row) {
-                        r_k_row = values_[j];
-                        break;
-                    }
-                }
+            // sum_{k<col} L[row,k] * L[col,k]
+            const auto& rows_row = col_rows[row];
+            const auto& rows_col = col_rows[col];
 
-                // 找 R[k,col]
-                Scalar r_k_col = ScalarConstants<P>::zero();
-                for (int j = row_ptr_[k]; j < row_ptr_[k + 1]; j++) {
-                    if (col_ind_[j] == col) {
-                        r_k_col = values_[j];
-                        break;
+            size_t i1 = 0, i2 = 0;
+            while (i1 < rows_row.size() && i2 < rows_col.size()) {
+                int k1 = rows_row[i1];
+                int k2 = rows_col[i2];
+                if (k1 >= col || k2 >= col) break;
+                if (k1 == k2) {
+                    auto it_row = col_map[row].find(k1);
+                    auto it_col = col_map[col].find(k1);
+                    if (it_row != col_map[row].end() && it_col != col_map[col].end()) {
+                        sum_prod += l_values_[it_row->second] * l_values_[it_col->second];
                     }
+                    i1++; i2++;
+                } else if (k1 < k2) {
+                    i1++;
+                } else {
+                    i2++;
                 }
-
-                sum_prod += r_k_row * r_k_col;
             }
 
-            if (r_row_row != ScalarConstants<P>::zero()) {
-                values_[j_idx] = (values_[j_idx] - sum_prod) / r_row_row;
+            // L[col,col]
+            auto it_col_diag = col_map[col].find(col);
+            if (it_col_diag != col_map[col].end()) {
+                Scalar l_col_col = l_values_[it_col_diag->second];
+                if (l_col_col != ScalarConstants<P>::zero()) {
+                    l_values_[j_idx] = (l_values_[j_idx] - sum_prod) / l_col_col;
+                }
+            }
+        }
+
+        // 计算对角线 L[row,row] = sqrt(A[row,row] - sum_{k<row} L[row,k]^2)
+        Scalar sum_sq = ScalarConstants<P>::zero();
+        for (int k : col_rows[row]) {
+            if (k < row) {
+                auto it = col_map[row].find(k);
+                if (it != col_map[row].end()) {
+                    Scalar l_row_k = l_values_[it->second];
+                    sum_sq += l_row_k * l_row_k;
+                }
+            }
+        }
+
+        Scalar diag_val = l_values_[diag_idx] - sum_sq;
+        if (diag_val > ScalarConstants<P>::zero()) {
+            l_values_[diag_idx] = std::sqrt(diag_val);
+        } else {
+            l_values_[diag_idx] = std::sqrt(std::fabs(diag_val) + 1e-12);
+        }
+        diag_[row] = l_values_[diag_idx];
+    }
+
+    // ========================================================================
+    // Step 5: 构建上三角 R = L^T 的 CSR 结构（用于后向代入）
+    // ========================================================================
+    // 统计每行上三角元素数量
+    row_ptr_.resize(n_ + 1, 0);
+    for (int col = 0; col < n_; col++) {
+        for (int k : col_rows[col]) {
+            if (k > col) {  // L[k,col] 存在且 k > col，对应 R[col,k]
+                row_ptr_[col + 1]++;
+            }
+        }
+        row_ptr_[col + 1]++;  // 对角线
+    }
+    for (int i = 0; i < n_; i++) {
+        row_ptr_[i + 1] += row_ptr_[i];
+    }
+
+    int r_nnz = row_ptr_[n_];
+    col_ind_.resize(r_nnz);
+    values_.resize(r_nnz);
+
+    // 填充 R（按行）
+    std::vector<int> cur_pos(n_, 0);
+    for (int row = 0; row < n_; row++) {
+        // 先填对角线
+        int diag_pos = row_ptr_[row];
+        col_ind_[diag_pos] = row;
+        values_[diag_pos] = diag_[row];
+        cur_pos[row] = diag_pos + 1;
+
+        // 填非对角线：R[row,col] = L[col,row] for col > row
+        for (int k : col_rows[row]) {
+            if (k > row) {
+                auto it = col_map[k].find(row);
+                if (it != col_map[k].end()) {
+                    int pos = cur_pos[row]++;
+                    col_ind_[pos] = k;
+                    values_[pos] = l_values_[it->second];
+                }
             }
         }
     }
@@ -234,75 +296,51 @@ void CPUIPCPreconditioner<P>::setup(const SparseMatrix<P>& A) {
 template<Precision P>
 void CPUIPCPreconditioner<P>::apply(const std::vector<typename CPUIPCPreconditioner<P>::Scalar>& r,
                                      std::vector<typename CPUIPCPreconditioner<P>::Scalar>& z) const {
-    // M z = r, M = R^T * R
-    // 先解 R^T * t = r（前向代入，R^T 是下三角）
-    // 再解 R * z = t（后向代入，R 是上三角）
-    std::vector<typename CPUIPCPreconditioner<P>::Scalar> t(n_);
-    forward_substitute(r, t);   // R^T * t = r
-    backward_substitute(t, z);  // R * z = t
+    // M z = r, M = L * L^T
+    // 先解 L * y = r（前向代入）
+    // 再解 L^T * z = y（后向代入）
+    std::vector<typename CPUIPCPreconditioner<P>::Scalar> y(n_);
+    forward_substitute(r, y);
+    backward_substitute(y, z);
 }
 
 template<Precision P>
 void CPUIPCPreconditioner<P>::forward_substitute(const std::vector<typename CPUIPCPreconditioner<P>::Scalar>& b,
-                                                  std::vector<typename CPUIPCPreconditioner<P>::Scalar>& t) const {
-    // R^T * t = b
-    // R^T 是下三角，第 row 行非零元素对应 R[k,row] (k <= row)
-    // t[row] = (b[row] - sum_{k<row} R[k,row] * t[k]) / R[row,row]
+                                                  std::vector<typename CPUIPCPreconditioner<P>::Scalar>& y) const {
+    // L * y = b，L 是下三角（CSR 格式）
+    // y[row] = (b[row] - sum_{col<row} L[row,col] * y[col]) / L[row,row]
     using Scalar = typename CPUIPCPreconditioner<P>::Scalar;
 
     for (int row = 0; row < n_; row++) {
-        Scalar sum = ScalarConstants<P>::zero();
-        Scalar r_row_row = ScalarConstants<P>::one();
+        Scalar sum = b[row];
 
-        // 遍历 R 的第 row 列，找 R[k,row] (k <= row)
-        // 由于 R 是 CSR 按行存储，需要在所有 k <= row 的行中找 col_ind == row
-        for (int k = 0; k < row; k++) {
-            // 在第 k 行找 col == row 的元素
-            for (int j = row_ptr_[k]; j < row_ptr_[k + 1]; j++) {
-                if (col_ind_[j] == row) {
-                    sum += values_[j] * t[k];
-                    break;
-                }
-            }
+        // 遍历第 row 行的 col < row 元素
+        for (int j = l_row_ptr_[row]; j < l_row_ptr_[row + 1] - 1; j++) {  // -1 跳过对角线
+            int col = l_col_ind_[j];
+            sum -= l_values_[j] * y[col];
         }
 
-        // 找对角线 R[row,row]
-        for (int j = row_ptr_[row]; j < row_ptr_[row + 1]; j++) {
-            if (col_ind_[j] == row) {
-                r_row_row = values_[j];
-                break;
-            }
-        }
-
-        t[row] = (b[row] - sum) / r_row_row;
+        y[row] = sum / diag_[row];
     }
 }
 
 template<Precision P>
-void CPUIPCPreconditioner<P>::backward_substitute(const std::vector<typename CPUIPCPreconditioner<P>::Scalar>& t,
-                                                   std::vector<typename CPUIPCPreconditioner<P>::Scalar>& x) const {
-    // R * x = t
-    // R 是上三角，第 row 行非零元素对应 R[row,col] (col >= row)
-    // x[row] = (t[row] - sum_{col>row} R[row,col] * x[col]) / R[row,row]
+void CPUIPCPreconditioner<P>::backward_substitute(const std::vector<typename CPUIPCPreconditioner<P>::Scalar>& y,
+                                                   std::vector<typename CPUIPCPreconditioner<P>::Scalar>& z) const {
+    // L^T * z = y，L^T 是上三角（CSR 格式，存储在 row_ptr_, col_ind_, values_）
+    // z[row] = (y[row] - sum_{col>row} L^T[row,col] * z[col]) / L^T[row,row]
     using Scalar = typename CPUIPCPreconditioner<P>::Scalar;
 
     for (int row = n_ - 1; row >= 0; row--) {
-        Scalar sum = t[row];
-        Scalar r_row_row = ScalarConstants<P>::one();
+        Scalar sum = y[row];
 
-        // 遍历第 row 行，找 col > row 的元素
-        bool found_diag = false;
-        for (int j = row_ptr_[row]; j < row_ptr_[row + 1]; j++) {
+        // 遍历第 row 行的 col > row 元素
+        for (int j = row_ptr_[row] + 1; j < row_ptr_[row + 1]; j++) {  // +1 跳过对角线
             int col = col_ind_[j];
-            if (col == row) {
-                r_row_row = values_[j];
-                found_diag = true;
-            } else if (col > row) {
-                sum -= values_[j] * x[col];
-            }
+            sum -= values_[j] * z[col];
         }
 
-        x[row] = sum / r_row_row;
+        z[row] = sum / diag_[row];
     }
 }
 

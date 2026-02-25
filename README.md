@@ -1,10 +1,11 @@
-# PCG (CPU/GPU) + AMG (CPU) 线性求解器
+# PCG (CPU/GPU) + AMG 线性求解器
 
-基于 C++ 和 NVIDIA CUDA 实现的高性能线性求解器,支持 PCG(CPU/GPU)和 AMG(CPU)两种算法,提供单/双精度计算。
+基于 C++ 和 NVIDIA CUDA 实现的高性能线性求解器，支持 PCG (CPU/GPU) 和 AMG (基于 amgcl) 两种算法，提供单/双精度计算。
 
 ## 特性
 
-- ✅ **多种求解算法**：PCG + ILU(0)、AMG (Smoothed Aggregation)
+- ✅ **多种求解算法**：PCG + ILU(0)/IC(0)/AMG 预处理、AMG 独立求解器 (基于 amgcl)
+- ✅ **多种预处理器**：ILU(0)、IC(0)、AMG、Jacobi
 - ✅ **CPU/GPU 统一接口**：通过 `Backend` 枚举选择计算后端
 - ✅ **单/双精度支持**：完整支持 float32 和 float64，类型安全，零运行时开销
 - ✅ **GPU 加速**：使用 CUDA、cuSPARSE、cuBLAS
@@ -16,64 +17,75 @@
 ## 性能
 
 **测试环境**:
-- CPU: Intel Xeon Gold 6348 @ 2.60GHz 
+- CPU: Intel Xeon Gold 6348 @ 2.60GHz
 - GPU: NVIDIA A100 80GB PCIe
 - 编译器: GCC with C++17, CUDA 12.6
 
 使用 Poisson 矩阵 (13761×13761, nnz=95065) 测试：
 
-### 单精度
+### 单精度 (float)
 
-| 方法 | 迭代次数 | 最终残差 | 求解时间 |
-|------|---------|-------------|----------|
-| PCG (CPU) | 130 | 9.27e-07 | 0.579s |
-| PCG (GPU) | 129 | 9.33e-07 | 0.035s |
-| AMG (CPU) | 19 | 9.27e-07 | 0.174s |
+| 方法              | 迭代次数 | 最终残差  | 求解时间 |
+|-------------------|----------|-----------|----------|
+| PCG+ILU(0) (CPU)  | 130      | 9.63e-04  | 0.511s   |
+| PCG+ILU(0) (GPU)  | 129      | 9.66e-04  | 0.032s   |
+| PCG+IC(0) (CPU)   | 144      | 9.84e-04  | 0.407s   |
+| PCG+IC(0) (GPU)   | 129      | 9.66e-04  | 0.026s   |
+| PCG+AMG (CPU)     | 12       | 7.36e-04  | 0.148s   |
+| PCG+AMG (GPU)     | 10       | 6.26e-04  | 0.011s   |
+| AMG (CPU)         | 11       | 1.67e-06  | 0.144s   |
 
-### 双精度
+### 双精度 (double)
 
-| 方法 | 迭代次数 | 最终残差 | 求解时间 |
-|------|---------|-------------|----------|
-| PCG (CPU) | 129 | 9.08e-07 | 0.517s |
-| PCG (GPU) | 129 | 9.08e-07 | 0.034s |
-| AMG (CPU) | 17 | 8.77e-07 | 0.150s |
+| 方法              | 迭代次数 | 最终残差  | 求解时间 |
+|-------------------|----------|-----------|----------|
+| PCG+ILU(0) (CPU)  | 129      | 9.53e-04  | 0.430s   |
+| PCG+ILU(0) (GPU)  | 129      | 9.53e-04  | 0.034s   |
+| PCG+IC(0) (CPU)   | 142      | 9.82e-04  | 0.405s   |
+| PCG+IC(0) (GPU)   | 129      | 9.53e-04  | 0.028s   |
+| PCG+AMG (CPU)     | 12       | 7.36e-04  | 0.151s   |
+| PCG+AMG (GPU)     | 10       | 6.26e-04  | 0.011s   |
+| AMG (CPU)         | 11       | 2.53e-09  | 0.143s   |
+
 
 
 
 ## 项目结构
 
 ```
-pcg_solver/
+linear_solver/
 ├── CMakeLists.txt          # 顶层构建配置
 ├── README.md               # 本文件
 │
 ├── include/                # 公共头文件
 │   ├── precision_traits.h  # 精度特征和类型映射
+│   ├── solve_stats.h       # 求解统计和 Backend 枚举
+│   ├── solvers.h           # 统一求解器入口
 │   ├── pcg_solver.h        # PCG 求解器（CPU/GPU 统一接口）
-│   ├── amg_solver.h        # AMG 求解器
-│   ├── amg_hierarchy.h     # AMG 层次结构
-│   ├── amg_coarsening.h    # AMG 粗化策略
-│   ├── amg_relaxation.h    # AMG 松弛算子
-│   ├── amg_interpolation.h # AMG 插值算子
-│   ├── preconditioner.h    # 预处理器（模板基类 + 实现）
+│   ├── amg_solver.h        # AMG 求解器（基于 amgcl）
+│   ├── amg_config.h        # AMG 配置参数
+│   ├── preconditioner.h    # 预处理器（ILU/IC/AMG/Jacobi）
 │   └── sparse_utils.h      # 稀疏矩阵和 CUDA 封装
 │
 ├── src/                    # 核心库源文件
 │   ├── pcg_solver.cpp      # PCG 求解器实现
-│   ├── amg_solver.cpp      # AMG 求解器实现
-│   ├── amg_hierarchy.cpp   # AMG 层次结构实现
-│   ├── amg_coarsening.cpp  # AMG 粗化实现
-│   ├── amg_relaxation.cpp  # AMG 松弛实现
-│   ├── amg_interpolation.cpp # AMG 插值实现
-│   ├── preconditioner.cpp  # 预处理器实现
+│   ├── amg_solver.cpp      # AMG 求解器实现（amgcl 封装）
+│   ├── preconditioner.cpp  # CPU 预处理器实现
+│   ├── preconditioner_cuda.cu # GPU 预处理器实现
 │   └── sparse_utils.cpp    # 稀疏矩阵和 CUDA 封装实现
 │
-└── examples/               # 示例程序
-    ├── main.cpp            # 综合测试程序
-    ├── CMakeLists.txt      # Examples CMake 配置
-    ├── run_test.sh         # 测试脚本（支持精度选择）
-    ├── matrix_poisson_P1_14401      # 测试矩阵
-    └── matrix_poisson_P1rhs_14401   # 测试右端项
+├── examples/               # 示例程序
+│   ├── main.cpp            # 综合测试程序
+│   ├── CMakeLists.txt      # Examples CMake 配置
+│   ├── run_test.sh         # 测试脚本（支持精度选择）
+│   ├── matrix_poisson_P1_14401      # 测试矩阵
+│   └── matrix_poisson_P1rhs_14401   # 测试右端项
+│
+└── test/                   # 综合测试
+    ├── src/combined_test.cpp   # 测试程序
+    ├── include/mm_reader.h     # Matrix Market 读取器
+    ├── run_all_tests.sh        # 批量测试脚本
+    └── matrices_florida/       # Florida 稀疏矩阵集
 
 build/                      # 构建目录（编译后生成）
 ├── liblinear_solver.a      # 静态库
@@ -83,9 +95,10 @@ build/                      # 构建目录（编译后生成）
 
 ## 依赖
 
-- **CUDA** 12.6（自动检测，也支持其他版本）
+- **CUDA** 11.8+（自动检测，推荐 12.6）
 - **cuSPARSE** - 稀疏矩阵运算
 - **cuBLAS** - 向量运算
+- **amgcl** - AMG 求解器库
 - **CMake** >= 3.20
 - **C++17** 编译器（GCC 7.0+, Clang 5.0+）
 
@@ -159,9 +172,13 @@ cd build/examples
   ------------------------------------------------------------------------------------
   Method                   |   Iters |    Residual |   Time (s) |  Converged |
   ------------------------------------------------------------------------------------
-  PCG (CPU)                |     129 |    9.08e-07 |     0.427 |        Yes |
-  PCG (GPU)                |     129 |    9.08e-07 |     0.033 |        Yes |
-  AMG (CPU)                |      17 |    8.77e-07 |     0.151 |        Yes |
+  PCG+ILU0 (CPU)           |     130 |    9.63e-04 |     0.5114 |        Yes |
+  PCG+ILU0 (GPU)           |     129 |    9.66e-04 |     0.0321 |        Yes |
+  PCG+IC0 (CPU)            |     144 |    9.84e-04 |     0.4068 |        Yes |
+  PCG+IC0 (GPU)            |     129 |    9.66e-04 |     0.0264 |        Yes |
+  PCG+AMG (CPU)            |      12 |    7.36e-04 |     0.1479 |        Yes |
+  PCG+AMG (GPU)            |      10 |    6.26e-04 |     0.0106 |        Yes |
+  AMG (CPU)                |      11 |    1.67e-06 |     0.1444 |        Yes |
   ------------------------------------------------------------------------------------
 ```
 
@@ -258,8 +275,9 @@ target_link_libraries(my_app PRIVATE CUDA::cusparse CUDA::cublas CUDA::cudart)
 // 配置求解器
 PCGConfig config;
 config.max_iterations = 1000;
-config.tolerance = 1e-6;
+config.tolerance = 1e-12;
 config.use_preconditioner = true;
+config.preconditioner_type = PreconditionerType::IC0;  // ILU0, IC0, AMG, JACOBI, NONE
 config.backend = BACKEND_GPU;
 config.precision = Precision::Float32;
 
@@ -280,32 +298,37 @@ SolveStats stats = solver.solve(A, b, x);
 
 ### AMG 求解器
 
+AMG 求解器基于 [amgcl](https://github.com/ddemidov/amgcl) 库实现，支持 CPU 后端。
+
 ```cpp
 #include "amg_solver.h"
+#include "amg_config.h"
 #include "precision_traits.h"
 
 // 配置求解器
 AMGConfig config;
 config.max_iterations = 100;
-config.tolerance = 1e-6;
+config.tolerance = 1e-8;
 config.precision = Precision::Float32;
-config.max_levels = 10;           // 最大层数
-config.coarse_grid_size = 50;     // 最粗网格大小
-config.pre_smooth_steps = 1;      // 前光滑步数
-config.post_smooth_steps = 1;     // 后光滑步数
+config.use_pcg = true;               // true: PCG预处理的AMG, false: 纯V-cycle
+config.coarse_grid_size = 3000;      // 最粗网格大小
+config.pre_smooth_steps = 3;         // 前光滑步数
+config.post_smooth_steps = 3;        // 后光滑步数
+config.direct_coarse = true;         // 粗网格使用直接求解器
 
-// 创建求解器
-AMGSolver<Precision::Float32> solver(config);
+// 创建求解器（运行时精度选择）
+AMGSolverFloat solver(config);  // 或 AMGSolverDouble
 
 // 准备矩阵和右端项
-SparseMatrix<Precision::Float32> A(rows, cols, nnz);
-// ... 填充矩阵数据 ...
+std::vector<int> row_ptr, col_idx;
+std::vector<float> values;
+// ... 填充 CSR 格式矩阵数据 ...
 
 std::vector<float> b(n, 1.0f);  // 右端项
 std::vector<float> x(n, 0.0f);  // 初始解
 
 // 求解 Ax = b
-SolveStats stats = solver.solve(A, b, x);
+SolveStats stats = solver.solve(n, row_ptr, col_idx, values, b, x);
 ```
 
 ### 使用类型别名
@@ -324,52 +347,6 @@ using AMGSolverFloat = AMGSolver<Precision::Float32>;
 AMGSolverFloat solver(config);
 ```
 
-## 算法说明
-
-### 1. 预处理共轭梯度法（PCG）
-
-```
-给定：矩阵 A，右端项 b，初始解 x=0
-1. r = b - A*x
-2. while ||r|| > tol:
-    z = M^(-1) * r        # 预处理步骤
-    if k == 1:
-        p = z
-    else:
-        β = (r•z) / (r_old•z_old)
-        p = z + β*p
-    α = (r•z) / (p•A*p)
-    x = x + α*p
-    r = r - α*A*p
-```
-
-### 2. ILU(0) 预处理
-
-- **不完全 LU 分解**：保持 L 和 U 的稀疏结构与原矩阵相同
-- **零填充**：不添加新的非零元素
-- **三角求解**：前向替换（L）+ 后向替换（U）
-
-### 3. 代数多重网格（AMG）
-
-**核心思想**：使用多层网格加速收敛
-
-```
-V-Cycle 算法：
-1. 前光滑 (Pre-smoothing): Gauss-Seidel
-2. 残差计算: r = b - A*x
-3. 限制到粗网格: r_c = R * r
-4. 粗网格求解: A_c * e_c = r_c (递归 V-Cycle)
-5. 插值回细网格: corr = P * e_c
-6. 校正解: x = x + corr
-7. 后光滑 (Post-smoothing): Gauss-Seidel
-```
-
-**关键组件**：
-- **Smoothed Aggregation 粗化**：基于强连接构建聚合
-- **插值平滑**：P = (I - ωD^(-1)A) * P_const
-- **Galerkin 乘积**：A_coarse = R * A * P
-- **最粗网格求解**：Gauss-Seidel 迭代
-
 ## 架构设计
 
 ### 分层架构
@@ -378,76 +355,73 @@ V-Cycle 算法：
 ┌─────────────────────────────────────┐
 │         应用层 (Application)         │
 │  - examples/main.cpp                │
+│  - test/combined_test.cpp           │
 └─────────────────────────────────────┘
                   ↓
 ┌─────────────────────────────────────┐
 │       求解器层 (Solver Layer)        │
 │  - PCGSolver (CPU/GPU 统一接口)      │
-│  - AMGSolver (CPU, 多层次结构)       │
-│  - PreconditionerBase<VectorType>    │
+│  - AMGSolver (基于 amgcl)           │
+│  - PreconditionerBase<VectorType>   │
 └─────────────────────────────────────┘
                   ↓
 ┌─────────────────────────────────────┐
 │      运算层 (Operation Layer)        │
 │  - SparseMatrix (CSR 格式)          │
-│  - GPUVector (RAII, 移动语义)       │
+│  - GPUVector (RAII, 移动语义)        │
 │  - CUBLASWrapper (RAII 封装)         │
-│  - CUSparseWrapper (RAII 封装)        │
+│  - CUSparseWrapper (RAII 封装)       │
 │  - CPUOps (namespace 简单实现)       │
 └─────────────────────────────────────┘
                   ↓
 ┌─────────────────────────────────────┐
 │      库接口层 (Library Layer)        │
 │  - cuBLAS / cuSPARSE / CUDA         │
+│  - amgcl (AMG 实现)                 │
 │  - 标准库 (CPU 后端)                 │
 └─────────────────────────────────────┘
 ```
 
 ## 性能优化建议
 
-### 选择合适的求解器
-
-| 场景 | 推荐求解器 | 原因 |
-|------|-----------|------|
-| **大规模问题** | AMG (CPU) | 迭代次数少，收敛快 |
-| **有 GPU 可用** | PCG (GPU) | 利用 GPU 并行加速 |
-| **内存受限** | PCG (CPU+ILU) | AMG 需要存储层次结构 |
-| **高质量解** | AMG (CPU) | 收敛更稳定 |
-
 ### AMG 参数调优
 
 ```cpp
 AMGConfig config;
 
-// 加速收敛（增加迭代步数）
-config.pre_smooth_steps = 2;
-config.post_smooth_steps = 2;
+// 加速收敛（增加光滑步数）
+config.pre_smooth_steps = 3;
+config.post_smooth_steps = 3;
 
-// 提高精度（减小粗网格阈值）
-config.coarse_grid_size = 30;
+// 提高精度（减小粗网格阈值，使用直接求解器）
+config.coarse_grid_size = 1000;
+config.direct_coarse = true;
 
-// 处理更复杂的问题（增加层数）
-config.max_levels = 15;
+// 使用 PCG 预处理的 AMG（推荐）
+config.use_pcg = true;
+
+// 调整松弛因子
+config.damping_factor = 0.72;  // Damped Jacobi 参数
 ```
 
 ## 扩展指南
 
 ### 添加新的预处理器
 
-1. 继承 `PreconditionerBase<VectorType>` 模板基类
+1. 继承 `PreconditionerBase<Precision, VectorType>` 模板基类
 2. 实现 `setup()` 和 `apply()` 方法
 3. 使用 `std::shared_ptr` 设置自定义预处理器
 
 ```cpp
 // GPU 预处理器示例
-class MyGPUPreconditioner : public PreconditionerBase<GPUVector> {
+class MyGPUPreconditioner : public PreconditionerBase<Precision::Float32, GPUVector<Precision::Float32>> {
 public:
-    void setup(const SparseMatrix& A) override;
-    void apply(const GPUVector& r, GPUVector& z) const override;
+    void setup(const SparseMatrix<Precision::Float32>& A) override;
+    void apply(const GPUVector<Precision::Float32>& r, GPUVector<Precision::Float32>& z) const override;
 };
 
 // 设置预处理器
-PCGSolver solver(config);
+PCGSolver<Precision::Float32> solver(config);
 solver.set_preconditioner(std::make_shared<MyGPUPreconditioner>());
 ```
 

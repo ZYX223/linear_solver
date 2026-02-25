@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <iostream>
 #include <cmath>
+#include <unordered_map>
 #include <cuda_runtime.h>
 
 // 抑制 nvcc 的废弃 API 警告
@@ -223,76 +224,88 @@ void GPUIPCPreconditioner<P>::setup(const SparseMatrix<P>& A) {
         }
     }
 
-    // IC(0) 分解: A ≈ R^T * R
-    // R 是上三角，按列计算
-    // 对于 col >= row 的元素 R[row,col]:
-    //   R[row,col] = (A[row,col] - sum_{k<row} R[k,row] * R[k,col]) / R[row,row]  (row < col)
-    //   R[row,row] = sqrt(A[row,row] - sum_{k<row} R[k,row]^2)                    (row == col)
+    // ========================================================================
+    // Step 1b: 构建列索引映射（使用 unordered_map 加速 O(1) 查找）
+    // ========================================================================
+    std::vector<std::unordered_map<int, int>> col_map(rows_);
+    for (int row = 0; row < rows_; row++) {
+        for (int j = row_ptr_[row]; j < row_ptr_[row + 1]; j++) {
+            col_map[row][col_ind_[j]] = j;
+        }
+    }
+
+    // ========================================================================
+    // Step 1c: 构建列到行的反向映射（加速稀疏遍历）
+    // ========================================================================
+    std::vector<std::vector<int>> col_rows(rows_);
+    for (int k = 0; k < rows_; k++) {
+        for (int j = row_ptr_[k]; j < row_ptr_[k + 1]; j++) {
+            int col = col_ind_[j];
+            col_rows[col].push_back(k);
+        }
+    }
+
+    // IC(0) 分解: A ≈ R^T * R（利用稀疏性优化版本）
     for (int row = 0; row < rows_; row++) {
         // 找到 R[row,row] 在 values_ 中的索引
-        int diag_idx = -1;
-        for (int j = row_ptr_[row]; j < row_ptr_[row + 1]; j++) {
-            if (col_ind_[j] == row) {
-                diag_idx = j;
-                break;
-            }
+        auto it_diag = col_map[row].find(row);
+        if (it_diag == col_map[row].end()) {
+            continue;  // 对角线元素缺失
         }
+        int diag_idx = it_diag->second;
 
-        // 先计算对角线 R[row,row]
+        // 计算 R[row,row] = sqrt(A[row,row] - sum_{k<row} R[k,row]^2)
+        // 只遍历 R[*,row] 列中实际存在的元素
         Scalar sum_sq = ScalarConstants<P>::zero();
-        for (int k = 0; k < row; k++) {
-            // 找 R[k,row]
-            Scalar r_k_row = ScalarConstants<P>::zero();
-            for (int j = row_ptr_[k]; j < row_ptr_[k + 1]; j++) {
-                if (col_ind_[j] == row) {
-                    r_k_row = values_[j];
-                    break;
+        for (int k : col_rows[row]) {
+            if (k < row) {
+                auto it = col_map[k].find(row);
+                if (it != col_map[k].end()) {
+                    Scalar r_k_row = values_[it->second];
+                    sum_sq += r_k_row * r_k_row;
                 }
             }
-            sum_sq += r_k_row * r_k_row;
         }
 
         Scalar diag_val = values_[diag_idx] - sum_sq;
         if (diag_val > ScalarConstants<P>::zero()) {
             values_[diag_idx] = std::sqrt(diag_val);
         } else {
-            // 数值保护
             values_[diag_idx] = std::sqrt(std::fabs(diag_val) + 1e-12);
         }
 
         Scalar r_row_row = values_[diag_idx];
+        if (r_row_row == ScalarConstants<P>::zero()) continue;
 
-        // 计算非对角线元素 R[row,col] (col > row)
+        // 计算 R[row,col] = (A[row,col] - sum_{k<row} R[k,row]*R[k,col]) / R[row,row]
         for (int j_idx = diag_idx + 1; j_idx < row_ptr_[row + 1]; j_idx++) {
             int col = col_ind_[j_idx];
 
-            // sum_{k<row} R[k,row] * R[k,col]
             Scalar sum_prod = ScalarConstants<P>::zero();
-            for (int k = 0; k < row; k++) {
-                // 找 R[k,row]
-                Scalar r_k_row = ScalarConstants<P>::zero();
-                for (int j = row_ptr_[k]; j < row_ptr_[k + 1]; j++) {
-                    if (col_ind_[j] == row) {
-                        r_k_row = values_[j];
-                        break;
-                    }
-                }
+            // 双指针遍历求交集（只遍历同时在 row 列和 col 列存在的 k）
+            const auto& rows_row = col_rows[row];
+            const auto& rows_col = col_rows[col];
 
-                // 找 R[k,col]
-                Scalar r_k_col = ScalarConstants<P>::zero();
-                for (int j = row_ptr_[k]; j < row_ptr_[k + 1]; j++) {
-                    if (col_ind_[j] == col) {
-                        r_k_col = values_[j];
-                        break;
+            size_t i1 = 0, i2 = 0;
+            while (i1 < rows_row.size() && i2 < rows_col.size()) {
+                int k1 = rows_row[i1];
+                int k2 = rows_col[i2];
+                if (k1 >= row || k2 >= row) break;
+                if (k1 == k2) {
+                    auto it_row = col_map[k1].find(row);
+                    auto it_col = col_map[k1].find(col);
+                    if (it_row != col_map[k1].end() && it_col != col_map[k1].end()) {
+                        sum_prod += values_[it_row->second] * values_[it_col->second];
                     }
+                    i1++; i2++;
+                } else if (k1 < k2) {
+                    i1++;
+                } else {
+                    i2++;
                 }
-
-                sum_prod += r_k_row * r_k_col;
             }
 
-            if (r_row_row != ScalarConstants<P>::zero()) {
-                values_[j_idx] = (values_[j_idx] - sum_prod) / r_row_row;
-            }
+            values_[j_idx] = (values_[j_idx] - sum_prod) / r_row_row;
         }
     }
 

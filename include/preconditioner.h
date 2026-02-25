@@ -8,6 +8,7 @@
 #include <thrust/device_vector.h>
 #include <memory>
 #include <vector>
+#include <unordered_map>
 
 // 抑制 cuSPARSE 废弃 API 警告 (csrilu02Info_t 等)
 // 这些宏定义在 sparse_utils.h 中
@@ -207,9 +208,18 @@ public:
 
 private:
     int n_;
+    // R 因子（上三角，CSR 格式）- 用于后向代入
     std::vector<int> row_ptr_;
     std::vector<int> col_ind_;
-    std::vector<Scalar> values_;  // IC(0) 分解后的 L 因子（下三角）
+    std::vector<Scalar> values_;
+
+    // L = R^T 因子（下三角，CSR 格式）- 用于前向代入
+    std::vector<int> l_row_ptr_;
+    std::vector<int> l_col_ind_;
+    std::vector<Scalar> l_values_;
+
+    // 对角线元素（单独存储，加速访问）
+    std::vector<Scalar> diag_;
 
     void forward_substitute(const Vector& b, Vector& y) const;
     void backward_substitute(const Vector& y, Vector& x) const;

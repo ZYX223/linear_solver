@@ -43,6 +43,7 @@ endif()
 
 # 选项
 option(BUILD_EXAMPLES "Build examples" ON)
+option(BUILD_TESTS "Build tests" ON)
 option(ENABLE_CUDA "Enable CUDA support" ON)
 
 # 库源文件
@@ -102,4 +103,8 @@ endif()
 # 添加子目录
 if(BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if(BUILD_TESTS)
+    add_subdirectory(test)
 endif()

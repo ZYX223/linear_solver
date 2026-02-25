@@ -125,13 +125,14 @@ void save_solution(const std::string& filename, const std::vector<typename Scala
 }
 
 template<Precision P>
-void run_pcg_test(const std::string& name, Backend backend, bool use_ilu,
+void run_pcg_test(const std::string& name, Backend backend, PreconditionerType precond_type,
                   const SparseMatrix<P>& A, const std::vector<typename ScalarType<P>::type>& b, int n,
                   const std::string& output_dir) {
     PCGConfig config;
     config.max_iterations = 1000;
     config.tolerance = 1e-6;
-    config.use_preconditioner = use_ilu;
+    config.use_preconditioner = (precond_type != PreconditionerType::NONE);
+    config.preconditioner_type = precond_type;
     config.backend = backend;
 
     using Scalar = typename ScalarType<P>::type;
@@ -142,10 +143,18 @@ void run_pcg_test(const std::string& name, Backend backend, bool use_ilu,
     print_stats_line(name, stats);
 
     // 保存解向量
-    std::string precision_str = (P == Precision::Float32) ? "float" : "double";
-    std::string backend_str = (backend == BACKEND_CPU) ? "cpu" : "gpu";
-    std::string filename = output_dir + "/solution_pcg_" + backend_str + "_" + precision_str + ".dat";
-    save_solution<P>(filename, x);
+    // std::string precision_str = (P == Precision::Float32) ? "float" : "double";
+    // std::string backend_str = (backend == BACKEND_CPU) ? "cpu" : "gpu";
+    // std::string precond_str = "none";
+    // switch (precond_type) {
+    //     case PreconditionerType::ILU0: precond_str = "ilu0"; break;
+    //     case PreconditionerType::IC0: precond_str = "ic0"; break;
+    //     case PreconditionerType::AMG: precond_str = "amg"; break;
+    //     case PreconditionerType::JACOBI: precond_str = "jacobi"; break;
+    //     default: precond_str = "none"; break;
+    // }
+    // std::string filename = output_dir + "/solution_pcg_" + precond_str + "_" + backend_str + "_" + precision_str + ".dat";
+    // save_solution<P>(filename, x);
 }
 
 template<Precision P>
@@ -170,9 +179,9 @@ void run_amg_test(const std::string& name,
     print_stats_line(name, stats);
 
     // 保存解向量
-    std::string precision_str = (P == Precision::Float32) ? "float" : "double";
-    std::string filename = output_dir + "/solution_amg_cpu_" + precision_str + ".dat";
-    save_solution<P>(filename, x);
+    // std::string precision_str = (P == Precision::Float32) ? "float" : "double";
+    // std::string filename = output_dir + "/solution_amg_cpu_" + precision_str + ".dat";
+    // save_solution<P>(filename, x);
 }
 
 // ============================================================================
@@ -207,24 +216,28 @@ void run_pcg_amg_test(const std::string& name, Backend backend,
     print_stats_line(name, stats);
 
     // 保存解向量
-    std::string precision_str = (P == Precision::Float32) ? "float" : "double";
-    std::string backend_str = (backend == BACKEND_CPU) ? "cpu" : "gpu";
-    std::string filename = output_dir + "/solution_" + name + "_" + backend_str + "_" + precision_str + ".dat";
-    save_solution<P>(filename, x);
+    // std::string precision_str = (P == Precision::Float32) ? "float" : "double";
+    // std::string backend_str = (backend == BACKEND_CPU) ? "cpu" : "gpu";
+    // std::string filename = output_dir + "/solution_" + name + "_" + backend_str + "_" + precision_str + ".dat";
+    // save_solution<P>(filename, x);
 }
 
 template<Precision P>
 void run_all_tests(const SparseMatrix<P>& A, const std::vector<typename ScalarType<P>::type>& b, int n,
                    const std::string& output_dir) {
     // PCG + ILU0 测试
-    run_pcg_test<P>("PCG+ILU0 (CPU)", BACKEND_CPU, true, A, b, n, output_dir);
-    run_pcg_test<P>("PCG+ILU0 (GPU)", BACKEND_GPU, true, A, b, n, output_dir);
+    run_pcg_test<P>("PCG+ILU0 (CPU)", BACKEND_CPU, PreconditionerType::ILU0, A, b, n, output_dir);
+    run_pcg_test<P>("PCG+ILU0 (GPU)", BACKEND_GPU, PreconditionerType::ILU0, A, b, n, output_dir);
+
+    // PCG + IC0 测试（不完全 Cholesky 分解，适用于对称正定矩阵）
+    run_pcg_test<P>("PCG+IC0 (CPU)", BACKEND_CPU, PreconditionerType::IC0, A, b, n, output_dir);
+    run_pcg_test<P>("PCG+IC0 (GPU)", BACKEND_GPU, PreconditionerType::IC0, A, b, n, output_dir);
 
     // PCG + AMG 测试
     run_pcg_amg_test<P>("PCG+AMG (CPU)", BACKEND_CPU, A, b, n, output_dir);
     run_pcg_amg_test<P>("PCG+AMG (GPU)", BACKEND_GPU, A, b, n, output_dir);
 
-    // 独立 AMG 求解器测试（用于对比）
+    // 独立 AMG 求解器测试
     run_amg_test<P>("AMG (CPU)", A, b, n, output_dir);
 }
 
@@ -279,7 +292,6 @@ int main(int argc, char** argv) {
 
         run_all_tests<Precision::Float32>(*A, b, n, output_dir);
 
-        // 智能指针自动清理,无需手动 delete
     } else {
         auto A = read_matrix_file<Precision::Float64>(matrix_file);
         int n;
@@ -292,7 +304,6 @@ int main(int argc, char** argv) {
 
         run_all_tests<Precision::Float64>(*A, b, n, output_dir);
 
-        // 智能指针自动清理,无需手动 delete
     }
 
     print_separator();

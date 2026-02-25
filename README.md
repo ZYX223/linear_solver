@@ -1,174 +1,157 @@
-# PCG (CPU/GPU) + AMG 线性求解器
+# PCG (CPU/GPU) + AMG Linear Solver
 
-基于 C++ 和 NVIDIA CUDA 实现的高性能线性求解器，支持 PCG (CPU/GPU) 和 AMG (基于 amgcl) 两种算法，提供单/双精度计算。
+A high-performance linear solver implemented in C++ and NVIDIA CUDA, supporting PCG (CPU/GPU) and AMG (based on amgcl) algorithms with single/double precision.
 
-## 特性
+## Features
 
-- ✅ **多种求解算法**：PCG + ILU(0)/IC(0)/AMG 预处理、AMG 独立求解器 (基于 amgcl)
-- ✅ **多种预处理器**：ILU(0)、IC(0)、AMG、Jacobi
-- ✅ **CPU/GPU 统一接口**：通过 `Backend` 枚举选择计算后端
-- ✅ **单/双精度支持**：完整支持 float32 和 float64，类型安全，零运行时开销
-- ✅ **GPU 加速**：使用 CUDA、cuSPARSE、cuBLAS
-- ✅ **模块化架构**：清晰的分层设计，易于扩展
-- ✅ **现代 C++**：C++17 标准，RAII 资源管理
-- ✅ **完全 RAII**：智能指针自动管理内存，异常安全
-- ✅ **模板化设计**：编译期多态，类型安全
+- Multiple solver algorithms: PCG + ILU(0)/IC(0)/AMG preconditioning, standalone AMG solver (based on amgcl)
+- Multiple preconditioners: ILU(0), IC(0), AMG, Jacobi
+- Unified CPU/GPU interface via `Backend` enum
+- Full float32 and float64 support with type safety and zero runtime overhead
+- GPU acceleration using CUDA, cuSPARSE, cuBLAS
+- Modular architecture with clear layered design
+- Modern C++17 with RAII resource management
+- Template-based design with compile-time polymorphism
 
-## 性能
+## Performance
 
-**测试环境**:
+**Test Environment**:
 - CPU: Intel Xeon Gold 6348 @ 2.60GHz
 - GPU: NVIDIA A100 80GB PCIe
-- 编译器: GCC with C++17, CUDA 12.6
+- Compiler: GCC with C++17, CUDA 12.6
 
-使用 Poisson 矩阵 (13761×13761, nnz=95065) 测试：
+Tested with Poisson matrix (13761x13761, nnz=95065):
 
-### 单精度 (float)
+### Single Precision (float)
 
-| 方法              | 迭代次数 | 最终残差  | 求解时间 |
-|-------------------|----------|-----------|----------|
-| PCG+ILU(0) (CPU)  | 130      | 9.63e-04  | 0.511s   |
-| PCG+ILU(0) (GPU)  | 129      | 9.66e-04  | 0.032s   |
-| PCG+IC(0) (CPU)   | 144      | 9.84e-04  | 0.407s   |
-| PCG+IC(0) (GPU)   | 129      | 9.66e-04  | 0.026s   |
-| PCG+AMG (CPU)     | 12       | 7.36e-04  | 0.148s   |
-| PCG+AMG (GPU)     | 10       | 6.26e-04  | 0.011s   |
-| AMG (CPU)         | 11       | 1.67e-06  | 0.144s   |
+| Method             | Iterations | Final Residual | Time   |
+|--------------------|------------|----------------|--------|
+| PCG+ILU(0) (CPU)   | 130        | 9.63e-04       | 0.511s |
+| PCG+ILU(0) (GPU)   | 129        | 9.66e-04       | 0.032s |
+| PCG+IC(0) (CPU)    | 144        | 9.84e-04       | 0.407s |
+| PCG+IC(0) (GPU)    | 129        | 9.66e-04       | 0.026s |
+| PCG+AMG (CPU)      | 12         | 7.36e-04       | 0.148s |
+| PCG+AMG (GPU)      | 10         | 6.26e-04       | 0.011s |
+| AMG (CPU)          | 11         | 1.67e-06       | 0.144s |
 
-### 双精度 (double)
+### Double Precision (double)
 
-| 方法              | 迭代次数 | 最终残差  | 求解时间 |
-|-------------------|----------|-----------|----------|
-| PCG+ILU(0) (CPU)  | 129      | 9.53e-04  | 0.430s   |
-| PCG+ILU(0) (GPU)  | 129      | 9.53e-04  | 0.034s   |
-| PCG+IC(0) (CPU)   | 142      | 9.82e-04  | 0.405s   |
-| PCG+IC(0) (GPU)   | 129      | 9.53e-04  | 0.028s   |
-| PCG+AMG (CPU)     | 12       | 7.36e-04  | 0.151s   |
-| PCG+AMG (GPU)     | 10       | 6.26e-04  | 0.011s   |
-| AMG (CPU)         | 11       | 2.53e-09  | 0.143s   |
+| Method             | Iterations | Final Residual | Time   |
+|--------------------|------------|----------------|--------|
+| PCG+ILU(0) (CPU)   | 129        | 9.53e-04       | 0.430s |
+| PCG+ILU(0) (GPU)   | 129        | 9.53e-04       | 0.034s |
+| PCG+IC(0) (CPU)    | 142        | 9.82e-04       | 0.405s |
+| PCG+IC(0) (GPU)    | 129        | 9.53e-04       | 0.028s |
+| PCG+AMG (CPU)      | 12         | 7.36e-04       | 0.151s |
+| PCG+AMG (GPU)      | 10         | 6.26e-04       | 0.011s |
+| AMG (CPU)          | 11         | 2.53e-09       | 0.143s |
 
-
-
-
-## 项目结构
+## Project Structure
 
 ```
 linear_solver/
-├── CMakeLists.txt          # 顶层构建配置
-├── README.md               # 本文件
+├── CMakeLists.txt          # Top-level build configuration
+├── README.md               # This file
 │
-├── include/                # 公共头文件
-│   ├── precision_traits.h  # 精度特征和类型映射
-│   ├── solve_stats.h       # 求解统计和 Backend 枚举
-│   ├── solvers.h           # 统一求解器入口
-│   ├── pcg_solver.h        # PCG 求解器（CPU/GPU 统一接口）
-│   ├── amg_solver.h        # AMG 求解器（基于 amgcl）
-│   ├── amg_config.h        # AMG 配置参数
-│   ├── preconditioner.h    # 预处理器（ILU/IC/AMG/Jacobi）
-│   └── sparse_utils.h      # 稀疏矩阵和 CUDA 封装
+├── include/                # Public headers
+│   ├── precision_traits.h  # Precision traits and type mapping
+│   ├── solve_stats.h       # Solve statistics and Backend enum
+│   ├── solvers.h           # Unified solver entry point
+│   ├── pcg_solver.h        # PCG solver (CPU/GPU unified interface)
+│   ├── amg_solver.h        # AMG solver (based on amgcl)
+│   ├── amg_config.h        # AMG configuration parameters
+│   ├── preconditioner.h    # Preconditioners (ILU/IC/AMG/Jacobi)
+│   └── sparse_utils.h      # Sparse matrix and CUDA wrappers
 │
-├── src/                    # 核心库源文件
-│   ├── pcg_solver.cpp      # PCG 求解器实现
-│   ├── amg_solver.cpp      # AMG 求解器实现（amgcl 封装）
-│   ├── preconditioner.cpp  # CPU 预处理器实现
-│   ├── preconditioner_cuda.cu # GPU 预处理器实现
-│   └── sparse_utils.cpp    # 稀疏矩阵和 CUDA 封装实现
+├── src/                    # Core library source files
+│   ├── pcg_solver.cpp      # PCG solver implementation
+│   ├── amg_solver.cpp      # AMG solver implementation (amgcl wrapper)
+│   ├── preconditioner.cpp  # CPU preconditioner implementations
+│   ├── preconditioner_cuda.cu # GPU preconditioner implementations
+│   └── sparse_utils.cpp    # Sparse matrix and CUDA wrapper implementations
 │
-├── examples/               # 示例程序
-│   ├── main.cpp            # 综合测试程序
-│   ├── CMakeLists.txt      # Examples CMake 配置
-│   ├── run_test.sh         # 测试脚本（支持精度选择）
-│   ├── matrix_poisson_P1_14401      # 测试矩阵
-│   └── matrix_poisson_P1rhs_14401   # 测试右端项
+├── examples/               # Example programs
+│   ├── main.cpp            # Comprehensive test program
+│   ├── CMakeLists.txt      # Examples CMake configuration
+│   ├── run_test.sh         # Test script (supports precision selection)
+│   ├── matrix_poisson_P1_14401      # Test matrix
+│   └── matrix_poisson_P1rhs_14401   # Test RHS vector
 │
-└── test/                   # 综合测试
-    ├── src/combined_test.cpp   # 测试程序
-    ├── include/mm_reader.h     # Matrix Market 读取器
-    ├── run_all_tests.sh        # 批量测试脚本
-    └── matrices_florida/       # Florida 稀疏矩阵集
+└── test/                   # Comprehensive tests
+    ├── src/combined_test.cpp   # Test program
+    ├── include/mm_reader.h     # Matrix Market reader
+    ├── run_all_tests.sh        # Batch test script
+    └── matrices_florida/       # Florida sparse matrix collection
 
-build/                      # 构建目录（编译后生成）
-├── liblinear_solver.a      # 静态库
+build/                      # Build directory (generated after compilation)
+├── liblinear_solver.a      # Static library
 └── examples/
-    └── main                # 可执行文件
+    └── main                # Executable
 ```
 
-## 依赖
+## Dependencies
 
-- **CUDA** 11.8+（自动检测，推荐 12.6）
-- **cuSPARSE** - 稀疏矩阵运算
-- **cuBLAS** - 向量运算
-- **amgcl** - AMG 求解器库
+- **CUDA** 11.8+ (auto-detected, 12.6 recommended)
+- **cuSPARSE** - Sparse matrix operations
+- **cuBLAS** - Vector operations
+- **amgcl** - AMG solver library (embedded in project)
 - **CMake** >= 3.20
-- **C++17** 编译器（GCC 7.0+, Clang 5.0+）
+- **C++17** compiler (GCC 7.0+, Clang 5.0+)
 
-## 编译
+## Build
 
-### 顶层构建（推荐）
+### Top-level Build (Recommended)
 
 ```bash
-# 在项目根目录
+# In project root directory
 mkdir -p build && cd build
 cmake ..
 make -j$(nproc)
 ```
 
-### 编译选项
+### Build Options
 
 ```bash
-# Release 模式（优化）
+# Release mode (optimized)
 cmake -DCMAKE_BUILD_TYPE=Release ..
 
-# 指定 CUDA 架构
+# Specify CUDA architecture
 cmake -DCMAKE_CUDA_ARCHITECTURES=80 ..
 
-# 指定 CUDA 路径（如果自动检测失败）
+# Specify CUDA path (if auto-detection fails)
 cmake -DCUDAToolkit_ROOT=/usr/local/cuda-12.6 ..
 ```
 
-## 使用
+## Usage
 
-### 1. 快速测试
+### 1. Quick Test
 
 ```bash
 cd examples
 
-# 测试两种精度（默认）
+# Test both precisions (default)
 ./run_test.sh matrix_poisson_P1_14401 matrix_poisson_P1rhs_14401
 
-# 仅测试单精度
+# Test single precision only
 ./run_test.sh matrix_poisson_P1_14401 matrix_poisson_P1rhs_14401 float
 
-# 仅测试双精度
+# Test double precision only
 ./run_test.sh matrix_poisson_P1_14401 matrix_poisson_P1rhs_14401 double
 ```
 
-### 2. 直接运行
-
-```bash
-# 在 build/examples 目录
-cd build/examples
-
-# 单精度测试
-./main ../../examples/matrix_poisson_P1_14401 ../../examples/matrix_poisson_P1rhs_14401 float
-
-# 双精度测试
-./main ../../examples/matrix_poisson_P1_14401 ../../examples/matrix_poisson_P1rhs_14401 double
-```
-
-输出示例：
+Sample output:
 
 ```
 ========================================
- 求解器综合测试
+ Solver Comprehensive Test
 ========================================
 
-[1/3] 读取矩阵文件: matrix_poisson_P1_14401
-[2/3] 读取右端项文件: matrix_poisson_P1rhs_14401
-[3/3] 运行测试...
+[1/3] Reading matrix file: matrix_poisson_P1_14401
+[2/3] Reading RHS file: matrix_poisson_P1rhs_14401
+[3/3] Running tests...
 
-问题规模: 13761 × 13761, nnz = 95065
-右端项大小: 13761
+Problem size: 13761 x 13761, nnz = 95065
+RHS size: 13761
   ------------------------------------------------------------------------------------
   Method                   |   Iters |    Residual |   Time (s) |  Converged |
   ------------------------------------------------------------------------------------
@@ -182,46 +165,69 @@ cd build/examples
   ------------------------------------------------------------------------------------
 ```
 
-### 3. 在其他项目中使用库
+### 2. Batch Testing with Florida Matrix Collection
 
-有两种方式可以在你的项目中使用 `linear_solver` 库：
+The `test/` directory contains test matrices from [SuiteSparse Matrix Collection](https://sparse.tamu.edu/):
 
----
+```bash
+cd test
 
-#### 方式一：add_subdirectory
+# Run all matrix tests (single + double precision)
+./run_all_tests.sh
 
-适合开发阶段，自动处理所有依赖：
+# Results saved in test_results_<timestamp>/ directory
+# - results.csv      CSV format results
+# - test_report.txt  Detailed test report
+```
+
+Test matrices:
+
+| Matrix    | Size            | NNZ     | Type           |
+|-----------|-----------------|---------|----------------|
+| nos4      | 100x100         | 347     | Structural     |
+| nos1      | 237x237         | 627     | Eigenvalue     |
+| poisson2D | 367x367         | 2,417   | Poisson PDE    |
+| 494_bus   | 494x494         | 1,080   | Power network  |
+| nos3      | 960x960         | 8,402   | Eigenvalue     |
+| bcsstk27  | 1,224x1,224     | 28,675  | Structural     |
+| bcsstk15  | 3,948x3,948     | 60,882  | Structural     |
+
+### 3. Using the Library in Other Projects
+
+#### Method 1: add_subdirectory
+
+Suitable for development phase, handles all dependencies automatically:
 
 ```cmake
 cmake_minimum_required(VERSION 3.20)
 project(my_project LANGUAGES CXX CUDA)
 
-# 设置 linear_solver 路径（可从命令行覆盖）
+# Set linear_solver path (can be overridden from command line)
 set(LINEAR_SOLVER_ROOT "/path/to/linear_solver" CACHE PATH "Path to linear_solver")
 
-# 添加 linear_solver 为子目录（自动处理头文件和依赖）
+# Add linear_solver as subdirectory (handles headers and dependencies)
 set(BUILD_EXAMPLES OFF CACHE BOOL "Build examples" FORCE)
 add_subdirectory(${LINEAR_SOLVER_ROOT} ${CMAKE_BINARY_DIR}/linear_solver)
 
-# 创建可执行文件
+# Create executable
 add_executable(my_app main.cpp)
 
-# 链接 linear_solver（自动包含 CUDA 库）
+# Link linear_solver (CUDA libraries included automatically)
 target_link_libraries(my_app PRIVATE linear_solver)
 ```
 
-#### 方式二：预编译库
+#### Method 2: Precompiled Library
 
-适合部署和生产环境，编译速度快：
+Suitable for deployment and production:
 
 ```cmake
 cmake_minimum_required(VERSION 3.20)
 project(my_project LANGUAGES CXX)
 
-# 设置 linear_solver 路径（可从命令行覆盖）
+# Set linear_solver path
 set(LINEAR_SOLVER_ROOT "/path/to/linear_solver" CACHE PATH "Path to linear_solver")
 
-# 查找预编译的静态库
+# Find precompiled static library
 find_library(LINEAR_SOLVER_LIB
     NAMES liblinear_solver.a
     PATHS
@@ -231,48 +237,47 @@ find_library(LINEAR_SOLVER_LIB
     NO_DEFAULT_PATH
 )
 
-# 创建可执行文件
+# Create executable
 add_executable(my_app main.cpp)
 
-# 手动指定头文件
+# Specify include directories
 target_include_directories(my_app PRIVATE ${LINEAR_SOLVER_ROOT}/include)
 
-# 链接预编译的静态库
+# Link precompiled library
 target_link_libraries(my_app PRIVATE ${LINEAR_SOLVER_LIB})
 
-# 查找并链接 CUDA 库（必须）
+# Find and link CUDA libraries (required)
 find_package(CUDAToolkit REQUIRED)
 target_link_libraries(my_app PRIVATE CUDA::cusparse CUDA::cublas CUDA::cudart)
 ```
 
+### 4. Matrix File Format
 
-### 4. 矩阵文件格式
-
-**矩阵文件**：
+**Matrix file**:
 ```
-行数 列数 非零元素数
-行索引 列索引 值
+rows cols nnz
+row_index col_index value
 ...
 ```
 
-**右端项文件**：
+**RHS file**:
 ```
-向量大小
-值1
-值2
+vector_size
+value1
+value2
 ...
 ```
 
 ## C++ API
 
-### PCG 求解器
+### PCG Solver
 
 ```cpp
 #include "pcg_solver.h"
 #include "preconditioner.h"
 #include "precision_traits.h"
 
-// 配置求解器
+// Configure solver
 PCGConfig config;
 config.max_iterations = 1000;
 config.tolerance = 1e-12;
@@ -281,152 +286,152 @@ config.preconditioner_type = PreconditionerType::IC0;  // ILU0, IC0, AMG, JACOBI
 config.backend = BACKEND_GPU;
 config.precision = Precision::Float32;
 
-// 创建求解器
+// Create solver
 PCGSolver<Precision::Float32> solver(config);
 
-// 准备矩阵和右端项
+// Prepare matrix and RHS
 SparseMatrix<Precision::Float32> A(rows, cols, nnz);
-// ... 填充矩阵数据 ...
+// ... fill matrix data ...
 A.upload_to_gpu();
 
-std::vector<float> b(n, 1.0f);  // 右端项
-std::vector<float> x(n, 0.0f);  // 初始解
+std::vector<float> b(n, 1.0f);  // RHS
+std::vector<float> x(n, 0.0f);  // Initial solution
 
-// 求解 Ax = b
+// Solve Ax = b
 SolveStats stats = solver.solve(A, b, x);
 ```
 
-### AMG 求解器
+### AMG Solver
 
-AMG 求解器基于 [amgcl](https://github.com/ddemidov/amgcl) 库实现，支持 CPU 后端。
+The AMG solver is based on the [amgcl](https://github.com/ddemidov/amgcl) library.
 
 ```cpp
 #include "amg_solver.h"
 #include "amg_config.h"
 #include "precision_traits.h"
 
-// 配置求解器
+// Configure solver
 AMGConfig config;
 config.max_iterations = 100;
 config.tolerance = 1e-8;
 config.precision = Precision::Float32;
-config.use_pcg = true;               // true: PCG预处理的AMG, false: 纯V-cycle
-config.coarse_grid_size = 3000;      // 最粗网格大小
-config.pre_smooth_steps = 3;         // 前光滑步数
-config.post_smooth_steps = 3;        // 后光滑步数
-config.direct_coarse = true;         // 粗网格使用直接求解器
+config.use_pcg = true;               // true: PCG-preconditioned AMG, false: pure V-cycle
+config.coarse_grid_size = 3000;      // Coarse grid size threshold
+config.pre_smooth_steps = 3;         // Pre-smoothing steps
+config.post_smooth_steps = 3;        // Post-smoothing steps
+config.direct_coarse = true;         // Use direct solver on coarse grid
 
-// 创建求解器（运行时精度选择）
-AMGSolverFloat solver(config);  // 或 AMGSolverDouble
+// Create solver (runtime precision selection)
+AMGSolverFloat solver(config);  // or AMGSolverDouble
 
-// 准备矩阵和右端项
+// Prepare matrix in CSR format
 std::vector<int> row_ptr, col_idx;
 std::vector<float> values;
-// ... 填充 CSR 格式矩阵数据 ...
+// ... fill CSR format matrix data ...
 
-std::vector<float> b(n, 1.0f);  // 右端项
-std::vector<float> x(n, 0.0f);  // 初始解
+std::vector<float> b(n, 1.0f);  // RHS
+std::vector<float> x(n, 0.0f);  // Initial solution
 
-// 求解 Ax = b
+// Solve Ax = b
 SolveStats stats = solver.solve(n, row_ptr, col_idx, values, b, x);
 ```
 
-### 使用类型别名
+### Type Aliases
 
 ```cpp
-// PCG 类型别名
+// PCG type aliases
 using PCGSolverFloat = PCGSolver<Precision::Float32>;
 using SparseMatrixFloat = SparseMatrix<Precision::Float32>;
 
 PCGSolverFloat solver(config);
 SparseMatrixFloat A(rows, cols, nnz);
 
-// AMG 类型别名
+// AMG type aliases
 using AMGSolverFloat = AMGSolver<Precision::Float32>;
 
 AMGSolverFloat solver(config);
 ```
 
-## 架构设计
+## Architecture
 
-### 分层架构
+### Layered Architecture
 
 ```
-┌─────────────────────────────────────┐
-│         应用层 (Application)         │
-│  - examples/main.cpp                │
-│  - test/combined_test.cpp           │
-└─────────────────────────────────────┘
-                  ↓
-┌─────────────────────────────────────┐
-│       求解器层 (Solver Layer)        │
-│  - PCGSolver (CPU/GPU 统一接口)      │
-│  - AMGSolver (基于 amgcl)           │
-│  - PreconditionerBase<VectorType>   │
-└─────────────────────────────────────┘
-                  ↓
-┌─────────────────────────────────────┐
-│      运算层 (Operation Layer)        │
-│  - SparseMatrix (CSR 格式)          │
-│  - GPUVector (RAII, 移动语义)        │
-│  - CUBLASWrapper (RAII 封装)         │
-│  - CUSparseWrapper (RAII 封装)       │
-│  - CPUOps (namespace 简单实现)       │
-└─────────────────────────────────────┘
-                  ↓
-┌─────────────────────────────────────┐
-│      库接口层 (Library Layer)        │
-│  - cuBLAS / cuSPARSE / CUDA         │
-│  - amgcl (AMG 实现)                 │
-│  - 标准库 (CPU 后端)                 │
-└─────────────────────────────────────┘
++-------------------------------------+
+|         Application Layer           |
+|  - examples/main.cpp                |
+|  - test/combined_test.cpp           |
++-------------------------------------+
+                  |
++-------------------------------------+
+|         Solver Layer                |
+|  - PCGSolver (CPU/GPU unified)      |
+|  - AMGSolver (based on amgcl)       |
+|  - PreconditionerBase<VectorType>   |
++-------------------------------------+
+                  |
++-------------------------------------+
+|        Operation Layer              |
+|  - SparseMatrix (CSR format)        |
+|  - GPUVector (RAII, move semantics) |
+|  - CUBLASWrapper (RAII wrapper)     |
+|  - CUSparseWrapper (RAII wrapper)   |
+|  - CPUOps (namespace implementation)|
++-------------------------------------+
+                  |
++-------------------------------------+
+|        Library Layer                |
+|  - cuBLAS / cuSPARSE / CUDA         |
+|  - amgcl (AMG implementation)       |
+|  - STL (CPU backend)                |
++-------------------------------------+
 ```
 
-## 性能优化建议
+## Performance Tuning
 
-### AMG 参数调优
+### AMG Parameter Tuning
 
 ```cpp
 AMGConfig config;
 
-// 加速收敛（增加光滑步数）
+// Accelerate convergence (increase smoothing steps)
 config.pre_smooth_steps = 3;
 config.post_smooth_steps = 3;
 
-// 提高精度（减小粗网格阈值，使用直接求解器）
+// Improve accuracy (reduce coarse grid threshold, use direct solver)
 config.coarse_grid_size = 1000;
 config.direct_coarse = true;
 
-// 使用 PCG 预处理的 AMG（推荐）
+// Use PCG-preconditioned AMG (recommended)
 config.use_pcg = true;
 
-// 调整松弛因子
-config.damping_factor = 0.72;  // Damped Jacobi 参数
+// Adjust damping factor
+config.damping_factor = 0.72;  // Damped Jacobi parameter
 ```
 
-## 扩展指南
+## Extension Guide
 
-### 添加新的预处理器
+### Adding New Preconditioners
 
-1. 继承 `PreconditionerBase<Precision, VectorType>` 模板基类
-2. 实现 `setup()` 和 `apply()` 方法
-3. 使用 `std::shared_ptr` 设置自定义预处理器
+1. Inherit from `PreconditionerBase<Precision, VectorType>` template base class
+2. Implement `setup()` and `apply()` methods
+3. Set custom preconditioner using `std::shared_ptr`
 
 ```cpp
-// GPU 预处理器示例
+// GPU preconditioner example
 class MyGPUPreconditioner : public PreconditionerBase<Precision::Float32, GPUVector<Precision::Float32>> {
 public:
     void setup(const SparseMatrix<Precision::Float32>& A) override;
     void apply(const GPUVector<Precision::Float32>& r, GPUVector<Precision::Float32>& z) const override;
 };
 
-// 设置预处理器
+// Set preconditioner
 PCGSolver<Precision::Float32> solver(config);
 solver.set_preconditioner(std::make_shared<MyGPUPreconditioner>());
 ```
 
-### 添加新的计算后端
+### Adding New Compute Backends
 
-1. 实现后端特定的向量运算
-2. 使用 `Backend` 枚举添加新选项
-3. 在 `solve()` 方法中添加分支
+1. Implement backend-specific vector operations
+2. Add new option using `Backend` enum
+3. Add branch in `solve()` method

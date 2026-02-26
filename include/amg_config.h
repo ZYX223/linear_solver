@@ -16,8 +16,8 @@ struct AMGConfig {
     int max_iterations = 100;           // 最大迭代次数
     double tolerance = 1e-8;           // 与 amgcl 保持一致
 
-    // AMG特定参数（与amgcl完全一致）
-    int max_levels = std::numeric_limits<int>::max();  // amgcl 默认无限制
+    // AMG特定参数
+    int max_levels = std::numeric_limits<int>::max(); 
     int coarse_grid_size = 3000;        // 与 skyline_lu 默认一致
     int pre_smooth_steps = 3;           // 前光滑步数（GPU推荐: 3）
     int post_smooth_steps = 3;          // 后光滑步数（GPU推荐: 3）
@@ -32,7 +32,7 @@ struct AMGConfig {
     bool estimate_spectral_radius = false;  // 默认 false，与 amgcl 保持一致
     int power_iters = 0;                  // 默认 0，与 amgcl 保持一致（使用 Gershgorin 定理）
 
-    Precision precision = Precision::Float32;
+    Precision precision = Precision::Float64;
 };
 
 #endif // AMG_CONFIG_H

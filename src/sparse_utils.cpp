@@ -19,8 +19,7 @@ CUBLASWrapper<P>::~CUBLASWrapper() {
 
 // 使用 if constexpr 消除精度特化重复代码
 template<Precision P>
-typename CUBLASWrapper<P>::Scalar
-CUBLASWrapper<P>::dot(int n, const Scalar* x, const Scalar* y) {
+auto CUBLASWrapper<P>::dot(int n, const Scalar* x, const Scalar* y) -> Scalar {
     Scalar result = Scalar();
     if constexpr (P == Precision::Float32) {
         CHECK_CUBLAS(cublasSdot(handle_, n, x, 1, y, 1, &result));
@@ -77,8 +76,8 @@ template<Precision P>
 void CUSparseWrapper<P>::spmv(cusparseSpMatDescr_t matA,
                                const cusparseDnVecDescr_t vecX,
                                cusparseDnVecDescr_t vecY,
-                               typename CUSparseWrapper<P>::Scalar alpha,
-                               typename CUSparseWrapper<P>::Scalar beta,
+                               Scalar alpha,
+                               Scalar beta,
                                void* buffer) {
     CHECK_CUSPARSE(cusparseSpMV(handle_, CUSPARSE_OPERATION_NON_TRANSPOSE,
                                 &alpha, matA, vecX, &beta, vecY,
@@ -203,16 +202,17 @@ void CUSparseWrapper<P>::triangular_solve_setup(cusparseSpMatDescr_t matM,
                                                  cusparseSpSVDescr_t spsv_descr,
                                                  const cusparseDnVecDescr_t vecX,
                                                  const cusparseDnVecDescr_t vecY,
-                                                 void** d_buffer, size_t* buffer_size) {
+                                                 void** d_buffer, size_t* buffer_size,
+                                                 cusparseOperation_t op) {
     Scalar one = ScalarConstants<P>::one();
-    CHECK_CUSPARSE(cusparseSpSV_bufferSize(handle_, CUSPARSE_OPERATION_NON_TRANSPOSE,
+    CHECK_CUSPARSE(cusparseSpSV_bufferSize(handle_, op,
                                           &one, matM, vecX, vecY,
                                           CudaDataType<P>::value, CUSPARSE_SPSV_ALG_DEFAULT,
                                           spsv_descr, buffer_size));
     if (*d_buffer == nullptr) {
         CHECK_CUDA(cudaMalloc(d_buffer, *buffer_size));
     }
-    CHECK_CUSPARSE(cusparseSpSV_analysis(handle_, CUSPARSE_OPERATION_NON_TRANSPOSE,
+    CHECK_CUSPARSE(cusparseSpSV_analysis(handle_, op,
                                         &one, matM, vecX, vecY,
                                         CudaDataType<P>::value, CUSPARSE_SPSV_ALG_DEFAULT,
                                         spsv_descr, *d_buffer));
@@ -222,9 +222,10 @@ template<Precision P>
 void CUSparseWrapper<P>::triangular_solve(cusparseSpMatDescr_t matM,
                                           cusparseSpSVDescr_t spsv_descr,
                                           const cusparseDnVecDescr_t vecX,
-                                          cusparseDnVecDescr_t vecY) {
+                                          cusparseDnVecDescr_t vecY,
+                                          cusparseOperation_t op) {
     Scalar one = ScalarConstants<P>::one();
-    CHECK_CUSPARSE(cusparseSpSV_solve(handle_, CUSPARSE_OPERATION_NON_TRANSPOSE,
+    CHECK_CUSPARSE(cusparseSpSV_solve(handle_, op,
                                      &one, matM, vecX, vecY,
                                      CudaDataType<P>::value, CUSPARSE_SPSV_ALG_DEFAULT,
                                      spsv_descr));
@@ -252,13 +253,13 @@ template<Precision P>
 void SparseMatrix<P>::upload_to_gpu() {
     CHECK_CUDA(cudaMalloc(&d_row_ptr, (rows + 1) * sizeof(int)));
     CHECK_CUDA(cudaMalloc(&d_col_ind, nnz * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_values, nnz * sizeof(typename SparseMatrix<P>::Scalar)));
+    CHECK_CUDA(cudaMalloc(&d_values, nnz * sizeof(Scalar)));
 
     CHECK_CUDA(cudaMemcpy(d_row_ptr, row_ptr.data(), (rows + 1) * sizeof(int),
                           cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_col_ind, col_ind.data(), nnz * sizeof(int),
                           cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_values, values.data(), nnz * sizeof(typename SparseMatrix<P>::Scalar),
+    CHECK_CUDA(cudaMemcpy(d_values, values.data(), nnz * sizeof(Scalar),
                           cudaMemcpyHostToDevice));
 }
 
@@ -278,7 +279,7 @@ cusparseSpMatDescr_t SparseMatrix<P>::create_sparse_descr() const {
 
 template<Precision P>
 GPUVector<P>::GPUVector(size_t n) : n(n), d_data(nullptr) {
-    CHECK_CUDA(cudaMalloc(&d_data, n * sizeof(typename GPUVector<P>::Scalar)));
+    CHECK_CUDA(cudaMalloc(&d_data, n * sizeof(Scalar)));
 }
 
 template<Precision P>
@@ -312,13 +313,13 @@ GPUVector<P>& GPUVector<P>::operator=(GPUVector<P>&& other) noexcept {
 }
 
 template<Precision P>
-void GPUVector<P>::upload_from_host(const typename GPUVector<P>::Scalar* h_data) {
-    CHECK_CUDA(cudaMemcpy(d_data, h_data, n * sizeof(typename GPUVector<P>::Scalar), cudaMemcpyHostToDevice));
+void GPUVector<P>::upload_from_host(const Scalar* h_data) {
+    CHECK_CUDA(cudaMemcpy(d_data, h_data, n * sizeof(Scalar), cudaMemcpyHostToDevice));
 }
 
 template<Precision P>
-void GPUVector<P>::download_to_host(typename GPUVector<P>::Scalar* h_data) const {
-    CHECK_CUDA(cudaMemcpy(h_data, d_data, n * sizeof(typename GPUVector<P>::Scalar), cudaMemcpyDeviceToHost));
+void GPUVector<P>::download_to_host(Scalar* h_data) const {
+    CHECK_CUDA(cudaMemcpy(h_data, d_data, n * sizeof(Scalar), cudaMemcpyDeviceToHost));
 }
 
 template<Precision P>

@@ -12,7 +12,7 @@
 // AMG 求解器（使用内嵌的 amgcl 库）
 // ============================================================================
 
-// 不透明接口类（类型擦除）
+// 不透明接口类
 class AMGSolverImplBase {
 public:
     virtual ~AMGSolverImplBase() = default;
@@ -23,7 +23,7 @@ public:
 template<Precision P>
 class AMGSolver {
 public:
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
     using Vector = std::vector<Scalar>;
     using Matrix = SparseMatrix<P>;
 

@@ -12,26 +12,24 @@
 // PCG 求解器配置
 // ============================================================================
 
-// 预条件子类型定义已移至 preconditioner.h
-
 struct PCGConfig {
     int max_iterations = 1000;
     double tolerance = 1e-12;         // 使用double
-    bool use_preconditioner = false;  // 默认关闭预处理
-    PreconditionerType preconditioner_type = PreconditionerType::ILU0;  // 预条件子类型
+    bool use_preconditioner = true;  // 默认启用预处理
+    PreconditionerType preconditioner_type = PreconditionerType::ILU0;  // 默认使用ILU0预条件子
     Backend backend = BACKEND_GPU;    // 默认使用 GPU
-    Precision precision = Precision::Float32;  // 新增：精度选择
+    Precision precision = Precision::Float64;  // 精度选择
     std::shared_ptr<AMGConfig> amg_config = nullptr;  // AMG 预条件子配置
 };
 
 // ============================================================================
-// 统一 PCG 求解器（支持 CPU 和 GPU，模板化）
+// PCG 求解器
 // ============================================================================
 
 template<Precision P>
 class PCGSolver {
 public:
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
     using Vector = std::vector<Scalar>;
     using Matrix = SparseMatrix<P>;
     using GPUVectorType = GPUVector<P>;

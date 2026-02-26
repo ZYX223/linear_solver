@@ -10,7 +10,7 @@
 #include <amgcl/solver/cg.hpp>
 
 // ============================================================================
-// AMGCL 求解器的实现（使用类型擦除避免头文件暴露 amgcl）
+// AMGCL 求解器的实现
 // ============================================================================
 
 namespace {
@@ -19,7 +19,7 @@ namespace {
 template<Precision P>
 class AMGSolverImplTyped : public AMGSolverImplBase {
 public:
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
 
     explicit AMGSolverImplTyped(const AMGConfig& config)
         : config_(config), setup_done_(false) {}
@@ -138,7 +138,7 @@ SolveStats AMGSolver<P>::solve(const Matrix& A, const Vector& b, Vector& x) {
     // 设置求解器
     impl_->setup(&A, P);
 
-    // 初始化解向量（总是清零，与 test_amgcl 保持一致）
+    // 初始化解向量
     int n = A.rows;
     if (x.size() != static_cast<size_t>(n)) {
         x.resize(n, Scalar(0));

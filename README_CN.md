@@ -291,7 +291,7 @@ PCGConfig config;
 config.max_iterations = 1000;
 config.tolerance = 1e-12;
 config.use_preconditioner = true;
-config.preconditioner_type = PreconditionerType::IC0;  // ILU0, IC0, AMG, JACOBI, NONE
+config.preconditioner_type = PreconditionerType::ILU0;  // ILU0, IC0, AMG, NONE
 config.backend = BACKEND_GPU;
 config.precision = Precision::Float32;
 

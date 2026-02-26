@@ -2,8 +2,6 @@
 #include <stdio.h>
 #include <unordered_map>
 
-// 注意: GPUILUPreconditioner 的实现已移至 preconditioner_cuda.cu
-
 // ============================================================================
 // CPUILUPreconditioner 模板实现
 // ============================================================================
@@ -22,7 +20,7 @@ void CPUILUPreconditioner<P>::setup(const SparseMatrix<P>& A) {
 template<Precision P>
 void CPUILUPreconditioner<P>::setup(int n, const std::vector<int>& row_ptr,
                                      const std::vector<int>& col_ind,
-                                     const std::vector<typename CPUILUPreconditioner<P>::Scalar>& values) {
+                                     const std::vector<Scalar>& values) {
     n_ = n;
     row_ptr_ = row_ptr;
     col_ind_ = col_ind;
@@ -33,9 +31,9 @@ void CPUILUPreconditioner<P>::setup(int n, const std::vector<int>& row_ptr,
             int k = col_ind_[k_idx];
             if (k >= i) break;
 
-            typename CPUILUPreconditioner<P>::Scalar a_ik = values_[k_idx];
+            Scalar a_ik = values_[k_idx];
 
-            typename CPUILUPreconditioner<P>::Scalar a_kk = ScalarConstants<P>::zero();
+            Scalar a_kk = ScalarConstants<P>::zero();
             for (int p = row_ptr_[k]; p < row_ptr_[k + 1]; p++) {
                 if (col_ind_[p] == k) {
                     a_kk = values_[p];
@@ -51,7 +49,7 @@ void CPUILUPreconditioner<P>::setup(int n, const std::vector<int>& row_ptr,
                     int j = col_ind_[j_idx];
                     if (j <= k) continue;
 
-                    typename CPUILUPreconditioner<P>::Scalar a_kj = ScalarConstants<P>::zero();
+                    Scalar a_kj = ScalarConstants<P>::zero();
                     for (int p = row_ptr_[k]; p < row_ptr_[k + 1]; p++) {
                         if (col_ind_[p] == j) {
                             a_kj = values_[p];
@@ -69,18 +67,18 @@ void CPUILUPreconditioner<P>::setup(int n, const std::vector<int>& row_ptr,
 }
 
 template<Precision P>
-void CPUILUPreconditioner<P>::apply(const std::vector<typename CPUILUPreconditioner<P>::Scalar>& r,
-                                     std::vector<typename CPUILUPreconditioner<P>::Scalar>& z) const {
-    std::vector<typename CPUILUPreconditioner<P>::Scalar> y(n_);
+void CPUILUPreconditioner<P>::apply(const std::vector<Scalar>& r,
+                                     std::vector<Scalar>& z) const {
+    std::vector<Scalar> y(n_);
     forward_substitute(r, y);
     backward_substitute(y, z);
 }
 
 template<Precision P>
-void CPUILUPreconditioner<P>::forward_substitute(const std::vector<typename CPUILUPreconditioner<P>::Scalar>& b,
-                                                  std::vector<typename CPUILUPreconditioner<P>::Scalar>& y) const {
+void CPUILUPreconditioner<P>::forward_substitute(const std::vector<Scalar>& b,
+                                                  std::vector<Scalar>& y) const {
     for (int i = 0; i < n_; i++) {
-        typename CPUILUPreconditioner<P>::Scalar sum = b[i];
+        Scalar sum = b[i];
         for (int j = row_ptr_[i]; j < row_ptr_[i + 1]; j++) {
             int col = col_ind_[j];
             if (col < i) {
@@ -92,11 +90,11 @@ void CPUILUPreconditioner<P>::forward_substitute(const std::vector<typename CPUI
 }
 
 template<Precision P>
-void CPUILUPreconditioner<P>::backward_substitute(const std::vector<typename CPUILUPreconditioner<P>::Scalar>& y,
-                                                   std::vector<typename CPUILUPreconditioner<P>::Scalar>& x) const {
+void CPUILUPreconditioner<P>::backward_substitute(const std::vector<Scalar>& y,
+                                                   std::vector<Scalar>& x) const {
     for (int i = n_ - 1; i >= 0; i--) {
-        typename CPUILUPreconditioner<P>::Scalar sum = y[i];
-        typename CPUILUPreconditioner<P>::Scalar diag = ScalarConstants<P>::one();
+        Scalar sum = y[i];
+        Scalar diag = ScalarConstants<P>::one();
 
         for (int j = row_ptr_[i]; j < row_ptr_[i + 1]; j++) {
             int col = col_ind_[j];
@@ -123,7 +121,7 @@ template<Precision P>
 void CPUIPCPreconditioner<P>::setup(const SparseMatrix<P>& A) {
     n_ = A.rows;
 
-    using Scalar = typename CPUIPCPreconditioner<P>::Scalar;
+    using Scalar = Scalar;
 
     // ========================================================================
     // Step 1: 提取下三角部分（包括对角线）并构建 L 的 CSR 结构
@@ -294,22 +292,22 @@ void CPUIPCPreconditioner<P>::setup(const SparseMatrix<P>& A) {
 }
 
 template<Precision P>
-void CPUIPCPreconditioner<P>::apply(const std::vector<typename CPUIPCPreconditioner<P>::Scalar>& r,
-                                     std::vector<typename CPUIPCPreconditioner<P>::Scalar>& z) const {
+void CPUIPCPreconditioner<P>::apply(const std::vector<Scalar>& r,
+                                     std::vector<Scalar>& z) const {
     // M z = r, M = L * L^T
     // 先解 L * y = r（前向代入）
     // 再解 L^T * z = y（后向代入）
-    std::vector<typename CPUIPCPreconditioner<P>::Scalar> y(n_);
+    std::vector<Scalar> y(n_);
     forward_substitute(r, y);
     backward_substitute(y, z);
 }
 
 template<Precision P>
-void CPUIPCPreconditioner<P>::forward_substitute(const std::vector<typename CPUIPCPreconditioner<P>::Scalar>& b,
-                                                  std::vector<typename CPUIPCPreconditioner<P>::Scalar>& y) const {
+void CPUIPCPreconditioner<P>::forward_substitute(const std::vector<Scalar>& b,
+                                                  std::vector<Scalar>& y) const {
     // L * y = b，L 是下三角（CSR 格式）
     // y[row] = (b[row] - sum_{col<row} L[row,col] * y[col]) / L[row,row]
-    using Scalar = typename CPUIPCPreconditioner<P>::Scalar;
+    using Scalar = Scalar;
 
     for (int row = 0; row < n_; row++) {
         Scalar sum = b[row];
@@ -325,11 +323,11 @@ void CPUIPCPreconditioner<P>::forward_substitute(const std::vector<typename CPUI
 }
 
 template<Precision P>
-void CPUIPCPreconditioner<P>::backward_substitute(const std::vector<typename CPUIPCPreconditioner<P>::Scalar>& y,
-                                                   std::vector<typename CPUIPCPreconditioner<P>::Scalar>& z) const {
+void CPUIPCPreconditioner<P>::backward_substitute(const std::vector<Scalar>& y,
+                                                   std::vector<Scalar>& z) const {
     // L^T * z = y，L^T 是上三角（CSR 格式，存储在 row_ptr_, col_ind_, values_）
     // z[row] = (y[row] - sum_{col>row} L^T[row,col] * z[col]) / L^T[row,row]
-    using Scalar = typename CPUIPCPreconditioner<P>::Scalar;
+    using Scalar = Scalar;
 
     for (int row = n_ - 1; row >= 0; row--) {
         Scalar sum = y[row];
@@ -392,8 +390,8 @@ void CPUAMGPreconditioner<P>::setup(const SparseMatrix<P>& A) {
 }
 
 template<Precision P>
-void CPUAMGPreconditioner<P>::apply(const std::vector<PRECISION_SCALAR(P)>& r,
-                                      std::vector<PRECISION_SCALAR(P)>& z) const {
+void CPUAMGPreconditioner<P>::apply(const std::vector<ScalarT<P>>& r,
+                                      std::vector<ScalarT<P>>& z) const {
     if (!is_setup_) {
         printf("Error: CPUAMGPreconditioner not setup!\n");
         exit(1);
@@ -419,4 +417,3 @@ template class CPUAMGPreconditioner<Precision::Float64>;
 
 // 注意：GPU 预条件子（GPUILUPreconditioner, GPUIPCPreconditioner, GPUAMGPreconditioner）
 // 的实现和模板实例化已移到 src/preconditioner_cuda.cu
-// 该文件由 NVCC 编译，解决了 Thrust/cuSPARSE 兼容性问题

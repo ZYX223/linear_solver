@@ -54,7 +54,8 @@ template<>
 inline double ScalarConstants<Precision::Float64>::zero() { return 0.0; }
 
 // ============================================================================
-// 类型别名辅助宏
+// 类型别名模板
 // ============================================================================
 
-#define PRECISION_SCALAR(P) typename ScalarType<P>::type
+template<Precision P>
+using ScalarT = typename ScalarType<P>::type;

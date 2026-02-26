@@ -140,7 +140,7 @@ PreconditionerResult<P> test_pcg_preconditioner(const MMMatrix& mm,
                                                       const std::vector<double>& b_double,
                                                       bool use_gpu,
                                                       PreconditionerType prec_type) {
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
     using SparseMatrixType = SparseMatrix<P>;
 
     // 转换矩阵
@@ -446,12 +446,12 @@ struct AMGResult {
 };
 
 template <Precision P>
-AMGResult<PRECISION_SCALAR(P)> test_amg(const std::vector<int>& row_ptr,
+AMGResult<ScalarT<P>> test_amg(const std::vector<int>& row_ptr,
                                               const std::vector<int>& col_ind,
                                               const std::vector<double>& values_double,
                                               const std::vector<double>& b_double,
                                               int n) {
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
     using SparseMatrixType = SparseMatrix<P>;
 
     // 构建稀疏矩阵
@@ -512,7 +512,7 @@ AMGResult<PRECISION_SCALAR(P)> test_amg(const std::vector<int>& row_ptr,
 
 template <Precision P>
 void run_combined_test(const std::string& matrix_file, bool use_gpu) {
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
     std::string precision_str = (P == Precision::Float32) ? "float" : "double";
 
     std::cout << "\n";

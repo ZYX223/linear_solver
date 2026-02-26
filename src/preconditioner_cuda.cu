@@ -55,7 +55,6 @@ void GPUILUPreconditioner<P>::setup(const SparseMatrix<P>& A) {
     rows_ = A.rows;
     nnz_ = A.nnz;
 
-    using Scalar = typename GPUILUPreconditioner<P>::Scalar;
 
     // Step 1: 分配并复制矩阵值到 GPU
     CHECK_CUDA(cudaMalloc(&d_valsILU0_, nnz_ * sizeof(Scalar)));
@@ -191,7 +190,6 @@ template<Precision P>
 void GPUIPCPreconditioner<P>::setup(const SparseMatrix<P>& A) {
     rows_ = A.rows;
 
-    using Scalar = typename GPUIPCPreconditioner<P>::Scalar;
 
     // ========================================================================
     // Step 1: 在 CPU 上提取上三角部分并执行 IC(0) 分解
@@ -355,27 +353,12 @@ void GPUIPCPreconditioner<P>::setup(const SparseMatrix<P>& A) {
     auto vecX = dummy_x.create_dnvec_descr();
 
     // R^T 求解分析（使用 TRANSPOSE 操作）
-    Scalar one = ScalarConstants<P>::one();
-    CHECK_CUSPARSE(cusparseSpSV_bufferSize(sparse_->handle(), CUSPARSE_OPERATION_TRANSPOSE,
-                                           &one, matR_, vecR, vecX,
-                                           CudaDataType<P>::value, CUSPARSE_SPSV_ALG_DEFAULT,
-                                           spsvDescrRt_, &bufferSizeRt_));
-    CHECK_CUDA(cudaMalloc(&d_bufferRt_, bufferSizeRt_));
-    CHECK_CUSPARSE(cusparseSpSV_analysis(sparse_->handle(), CUSPARSE_OPERATION_TRANSPOSE,
-                                         &one, matR_, vecR, vecX,
-                                         CudaDataType<P>::value, CUSPARSE_SPSV_ALG_DEFAULT,
-                                         spsvDescrRt_, d_bufferRt_));
+    sparse_->triangular_solve_setup(matR_, spsvDescrRt_, vecR, vecX,
+                                    &d_bufferRt_, &bufferSizeRt_, CUSPARSE_OPERATION_TRANSPOSE);
 
     // R 求解分析（使用 NON_TRANSPOSE 操作）
-    CHECK_CUSPARSE(cusparseSpSV_bufferSize(sparse_->handle(), CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                           &one, matR_, vecR, vecX,
-                                           CudaDataType<P>::value, CUSPARSE_SPSV_ALG_DEFAULT,
-                                           spsvDescrR_, &bufferSizeR_));
-    CHECK_CUDA(cudaMalloc(&d_bufferR_, bufferSizeR_));
-    CHECK_CUSPARSE(cusparseSpSV_analysis(sparse_->handle(), CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                         &one, matR_, vecR, vecX,
-                                         CudaDataType<P>::value, CUSPARSE_SPSV_ALG_DEFAULT,
-                                         spsvDescrR_, d_bufferR_));
+    sparse_->triangular_solve_setup(matR_, spsvDescrR_, vecR, vecX,
+                                    &d_bufferR_, &bufferSizeR_);
 
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecR));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecX));
@@ -390,9 +373,6 @@ void GPUIPCPreconditioner<P>::apply(const GPUVector<P>& r, GPUVector<P>& z) cons
         exit(1);
     }
 
-    using Scalar = typename GPUIPCPreconditioner<P>::Scalar;
-    Scalar one = ScalarConstants<P>::one();
-
     auto vecR = r.create_dnvec_descr();
     auto vecT = cusparseDnVecDescr_t();
     auto vecZ = z.create_dnvec_descr();
@@ -400,16 +380,10 @@ void GPUIPCPreconditioner<P>::apply(const GPUVector<P>& r, GPUVector<P>& z) cons
     CHECK_CUSPARSE(cusparseCreateDnVec(&vecT, rows_, d_t_, CudaDataType<P>::value));
 
     // Step 1: R^T * t = r （使用 TRANSPOSE 操作，相当于下三角求解）
-    CHECK_CUSPARSE(cusparseSpSV_solve(sparse_->handle(), CUSPARSE_OPERATION_TRANSPOSE,
-                                      &one, matR_, vecR, vecT,
-                                      CudaDataType<P>::value, CUSPARSE_SPSV_ALG_DEFAULT,
-                                      spsvDescrRt_));
+    sparse_->triangular_solve(matR_, spsvDescrRt_, vecR, vecT, CUSPARSE_OPERATION_TRANSPOSE);
 
     // Step 2: R * z = t （使用 NON_TRANSPOSE 操作，上三角求解）
-    CHECK_CUSPARSE(cusparseSpSV_solve(sparse_->handle(), CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                      &one, matR_, vecT, vecZ,
-                                      CudaDataType<P>::value, CUSPARSE_SPSV_ALG_DEFAULT,
-                                      spsvDescrR_));
+    sparse_->triangular_solve(matR_, spsvDescrR_, vecT, vecZ);
 
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecR));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecT));
@@ -463,7 +437,10 @@ void GPUAMGPreconditioner<P>::setup(const SparseMatrix<P>& A) {
 
 template<Precision P>
 void GPUAMGPreconditioner<P>::apply(const GPUVector<P>& r, GPUVector<P>& z) const {
-    if (!is_setup_) return;
+    if (!is_setup_) {
+        printf("Error: GPUAMGPreconditioner not setup!\n");
+        exit(1);
+    }
 
     cudaMemcpy(thrust::raw_pointer_cast(r_dev_.data()),
                r.d_data, n_ * sizeof(Scalar), cudaMemcpyDeviceToDevice);

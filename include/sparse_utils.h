@@ -55,11 +55,11 @@
     } \
 } while(0)
 
-// cuBLAS封装（模板化）
+// cuBLAS封装
 template<Precision P>
 class CUBLASWrapper {
 public:
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
 
     CUBLASWrapper();
     ~CUBLASWrapper();
@@ -82,12 +82,11 @@ private:
     cublasHandle_t handle_;
 };
 
-// cuSPARSE封装（模板化）
+// cuSPARSE封装
 template<Precision P>
 class CUSparseWrapper {
 public:
-    using Scalar = PRECISION_SCALAR(P);
-    static constexpr cudaDataType_t cuda_data_type = CudaDataType<P>::value;
+    using Scalar = ScalarT<P>;
 
     CUSparseWrapper();
     ~CUSparseWrapper();
@@ -143,23 +142,24 @@ public:
                                  cusparseSpSVDescr_t spsv_descr,
                                  const cusparseDnVecDescr_t vecX,
                                  const cusparseDnVecDescr_t vecY,
-                                 void** d_buffer, size_t* buffer_size);
+                                 void** d_buffer, size_t* buffer_size,
+                                 cusparseOperation_t op = CUSPARSE_OPERATION_NON_TRANSPOSE);
 
     void triangular_solve(cusparseSpMatDescr_t matM,
                           cusparseSpSVDescr_t spsv_descr,
                           const cusparseDnVecDescr_t vecX,
-                          cusparseDnVecDescr_t vecY);
+                          cusparseDnVecDescr_t vecY,
+                          cusparseOperation_t op = CUSPARSE_OPERATION_NON_TRANSPOSE);
 
 private:
     cusparseHandle_t handle_;
 };
 
-// 稀疏矩阵（CSR格式，模板化）
+// 稀疏矩阵（CSR格式）
 template<Precision P>
 class SparseMatrix {
 public:
-    using Scalar = PRECISION_SCALAR(P);
-    static constexpr cudaDataType_t cuda_data_type = CudaDataType<P>::value;
+    using Scalar = ScalarT<P>;
 
     int rows, cols, nnz;
     std::vector<int> row_ptr;   // 行指针
@@ -180,12 +180,11 @@ public:
     cusparseSpMatDescr_t create_sparse_descr() const;
 };
 
-// GPU向量（模板化）
+// GPU向量
 template<Precision P>
 class GPUVector {
 public:
-    using Scalar = PRECISION_SCALAR(P);
-    static constexpr cudaDataType_t cuda_data_type = CudaDataType<P>::value;
+    using Scalar = ScalarT<P>;
 
     size_t n;  // 使用 size_t 避免负数
     Scalar* d_data;
@@ -193,11 +192,11 @@ public:
     GPUVector(size_t n);
     ~GPUVector();
 
-    // 禁止拷贝（CUDA 资源不应该被拷贝）
+    // 禁止拷贝
     GPUVector(const GPUVector&) = delete;
     GPUVector& operator=(const GPUVector&) = delete;
 
-    // 支持移动（提高性能）
+    // 支持移动
     GPUVector(GPUVector&& other) noexcept;
     GPUVector& operator=(GPUVector&& other) noexcept;
 
@@ -210,42 +209,42 @@ public:
 };
 
 // ============================================================================
-// CPU 向量运算（辅助函数，模板化）
+// CPU 向量运算
 // ============================================================================
 
 namespace CPUOps {
     template<Precision P>
-    PRECISION_SCALAR(P) dot(
-        const std::vector<PRECISION_SCALAR(P)>& x,
-        const std::vector<PRECISION_SCALAR(P)>& y
+    ScalarT<P> dot(
+        const std::vector<ScalarT<P>>& x,
+        const std::vector<ScalarT<P>>& y
     );
 
     template<Precision P>
     void axpy(
-        PRECISION_SCALAR(P) alpha,
-        const std::vector<PRECISION_SCALAR(P)>& x,
-        std::vector<PRECISION_SCALAR(P)>& y
+        ScalarT<P> alpha,
+        const std::vector<ScalarT<P>>& x,
+        std::vector<ScalarT<P>>& y
     );
 
     template<Precision P>
     void scal(
-        PRECISION_SCALAR(P) alpha,
-        std::vector<PRECISION_SCALAR(P)>& x
+        ScalarT<P> alpha,
+        std::vector<ScalarT<P>>& x
     );
 
     template<Precision P>
     void copy(
-        const std::vector<PRECISION_SCALAR(P)>& x,
-        std::vector<PRECISION_SCALAR(P)>& y
+        const std::vector<ScalarT<P>>& x,
+        std::vector<ScalarT<P>>& y
     );
 
     template<Precision P>
     void spmv(
         int n, const std::vector<int>& row_ptr,
         const std::vector<int>& col_ind,
-        const std::vector<PRECISION_SCALAR(P)>& values,
-        const std::vector<PRECISION_SCALAR(P)>& x,
-        std::vector<PRECISION_SCALAR(P)>& y
+        const std::vector<ScalarT<P>>& values,
+        const std::vector<ScalarT<P>>& x,
+        std::vector<ScalarT<P>>& y
     );
 }
 

@@ -10,9 +10,6 @@
 #include <vector>
 #include <unordered_map>
 
-// 抑制 cuSPARSE 废弃 API 警告 (csrilu02Info_t 等)
-// 这些宏定义在 sparse_utils.h 中
-
 // amgcl 库头文件（在 AMG 预条件子类型定义之前）
 #include <amgcl/backend/builtin.hpp>
 #include <amgcl/backend/cuda.hpp>
@@ -28,7 +25,6 @@
 /// 预条件子类型
 enum class PreconditionerType {
     NONE,     // 无预条件（纯 CG）
-    JACOBI,   // 对角预条件
     ILU0,     // 不完全 LU 分解
     IC0,      // 不完全 Cholesky 分解（对称正定矩阵专用）
     AMG       // 代数多重网格（自动选择 CPU 或 GPU 后端）
@@ -40,7 +36,7 @@ enum class PreconditionerType {
 template<Precision P, typename VectorType>
 class PreconditionerBase {
 public:
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
     virtual ~PreconditionerBase() = default;
 
     // 初始化预处理器（如ILU分解）
@@ -58,7 +54,7 @@ public:
 template<Precision P>
 class GPUILUPreconditioner : public PreconditionerBase<P, GPUVector<P>> {
 public:
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
     using Matrix = SparseMatrix<P>;
     using Vector = GPUVector<P>;
 
@@ -113,7 +109,7 @@ private:
 template<Precision P>
 class GPUIPCPreconditioner : public PreconditionerBase<P, GPUVector<P>> {
 public:
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
     using Matrix = SparseMatrix<P>;
     using Vector = GPUVector<P>;
 
@@ -161,9 +157,9 @@ private:
 // ============================================================================
 
 template<Precision P>
-class CPUILUPreconditioner : public PreconditionerBase<P, std::vector<PRECISION_SCALAR(P)>> {
+class CPUILUPreconditioner : public PreconditionerBase<P, std::vector<ScalarT<P>>> {
 public:
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
     using Matrix = SparseMatrix<P>;
     using Vector = std::vector<Scalar>;
 
@@ -194,9 +190,9 @@ private:
 // ============================================================================
 
 template<Precision P>
-class CPUIPCPreconditioner : public PreconditionerBase<P, std::vector<PRECISION_SCALAR(P)>> {
+class CPUIPCPreconditioner : public PreconditionerBase<P, std::vector<ScalarT<P>>> {
 public:
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
     using Matrix = SparseMatrix<P>;
     using Vector = std::vector<Scalar>;
 
@@ -230,9 +226,9 @@ private:
 // ============================================================================
 
 template<Precision P>
-class CPUAMGPreconditioner : public PreconditionerBase<P, std::vector<PRECISION_SCALAR(P)>> {
+class CPUAMGPreconditioner : public PreconditionerBase<P, std::vector<ScalarT<P>>> {
 public:
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
     using Vector = std::vector<Scalar>;
     using Matrix = SparseMatrix<P>;
 
@@ -245,7 +241,7 @@ public:
 private:
     std::shared_ptr<AMGConfig> config_;
 
-    // amgcl 类型定义（使用编译时类型，无需 Boost）
+    // amgcl 类型定义
     typedef amgcl::backend::builtin<Scalar> Backend;
     typedef amgcl::amg<
         Backend,
@@ -274,7 +270,7 @@ private:
 template<Precision P>
 class GPUAMGPreconditioner : public PreconditionerBase<P, GPUVector<P>> {
 public:
-    using Scalar = PRECISION_SCALAR(P);
+    using Scalar = ScalarT<P>;
     using Vector = GPUVector<P>;
     using Matrix = SparseMatrix<P>;
 

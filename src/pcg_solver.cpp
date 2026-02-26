@@ -54,9 +54,7 @@ void PCGSolver<P>::free_workspace() {
 }
 
 template<Precision P>
-SolveStats PCGSolver<P>::solve(const SparseMatrix<P>& A,
-                                const std::vector<typename PCGSolver<P>::Scalar>& b,
-                                std::vector<typename PCGSolver<P>::Scalar>& x) {
+SolveStats PCGSolver<P>::solve(const Matrix& A, const Vector& b, Vector& x) {
     if (backend_ == BACKEND_GPU) {
         return solve_gpu(A, b, x);
     } else {
@@ -96,7 +94,6 @@ void PCGSolver<P>::setup_gpu_preconditioner(const SparseMatrix<P>& A) {
         case PreconditionerType::AMG:
             gpu_preconditioner_ = std::make_shared<GPUAMGPreconditioner<P>>(sparse_, config_.amg_config);
             break;
-        case PreconditionerType::JACOBI:
         case PreconditionerType::NONE:
             break;
         default:
@@ -126,7 +123,6 @@ void PCGSolver<P>::setup_cpu_preconditioner(const SparseMatrix<P>& A) {
         case PreconditionerType::AMG:
             cpu_preconditioner_ = std::make_unique<CPUAMGPreconditioner<P>>(config_.amg_config);
             break;
-        case PreconditionerType::JACOBI:
         case PreconditionerType::NONE:
             break;
         default:
@@ -147,13 +143,11 @@ void PCGSolver<P>::setup_cpu_preconditioner(const SparseMatrix<P>& A) {
 template<Precision P>
 SolveStats PCGSolver<P>::solve_core_gpu(
     int n,
-    const SparseMatrix<P>& A,
-    const std::vector<typename PCGSolver<P>::Scalar>& b,
-    std::vector<typename PCGSolver<P>::Scalar>& x,
+    const Matrix& A,
+    const Vector& b,
+    Vector& x,
     const cusparseSpMatDescr_t matA,
     void* spmv_buffer) {
-
-    using Scalar = typename PCGSolver<P>::Scalar;
 
     Scalar one = ScalarConstants<P>::one();
     Scalar zero = ScalarConstants<P>::zero();
@@ -241,11 +235,9 @@ SolveStats PCGSolver<P>::solve_core_gpu(
 template<Precision P>
 SolveStats PCGSolver<P>::solve_core_cpu(
     int n,
-    const SparseMatrix<P>& A,
-    const std::vector<typename PCGSolver<P>::Scalar>& b,
-    std::vector<typename PCGSolver<P>::Scalar>& x) {
-
-    using Scalar = typename PCGSolver<P>::Scalar;
+    const Matrix& A,
+    const Vector& b,
+    Vector& x) {
 
     // 分配工作向量
     std::vector<Scalar> r(n);
@@ -320,9 +312,7 @@ SolveStats PCGSolver<P>::solve_core_cpu(
 // ============================================================================
 
 template<Precision P>
-SolveStats PCGSolver<P>::solve_gpu(const SparseMatrix<P>& A,
-                                   const std::vector<typename PCGSolver<P>::Scalar>& b,
-                                   std::vector<typename PCGSolver<P>::Scalar>& x) {
+SolveStats PCGSolver<P>::solve_gpu(const Matrix& A, const Vector& b, Vector& x) {
     int n = A.rows;
     allocate_workspace(n);
 
@@ -330,7 +320,6 @@ SolveStats PCGSolver<P>::solve_gpu(const SparseMatrix<P>& A,
     auto matA = A.create_sparse_descr();
 
     // 准备 SPMV buffer
-    using Scalar = typename PCGSolver<P>::Scalar;
     Scalar one = ScalarConstants<P>::one();
     Scalar zero = ScalarConstants<P>::zero();
 
@@ -368,9 +357,7 @@ SolveStats PCGSolver<P>::solve_gpu(const SparseMatrix<P>& A,
 // ============================================================================
 
 template<Precision P>
-SolveStats PCGSolver<P>::solve_cpu(const SparseMatrix<P>& A,
-                                   const std::vector<typename PCGSolver<P>::Scalar>& b,
-                                   std::vector<typename PCGSolver<P>::Scalar>& x) {
+SolveStats PCGSolver<P>::solve_cpu(const Matrix& A, const Vector& b, Vector& x) {
     int n = A.rows;
 
     // 统一预条件子管理

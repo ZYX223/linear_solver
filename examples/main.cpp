@@ -150,7 +150,6 @@ void run_pcg_test(const std::string& name, Backend backend, PreconditionerType p
     //     case PreconditionerType::ILU0: precond_str = "ilu0"; break;
     //     case PreconditionerType::IC0: precond_str = "ic0"; break;
     //     case PreconditionerType::AMG: precond_str = "amg"; break;
-    //     case PreconditionerType::JACOBI: precond_str = "jacobi"; break;
     //     default: precond_str = "none"; break;
     // }
     // std::string filename = output_dir + "/solution_pcg_" + precond_str + "_" + backend_str + "_" + precision_str + ".dat";

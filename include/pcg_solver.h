@@ -14,7 +14,7 @@
 
 struct PCGConfig {
     int max_iterations = 1000;
-    double tolerance = 1e-12;         // 使用double
+    double tolerance = 1e-8;         // 使用double
     bool use_preconditioner = true;  // 默认启用预处理
     PreconditionerType preconditioner_type = PreconditionerType::ILU0;  // 默认使用ILU0预条件子
     Backend backend = BACKEND_GPU;    // 默认使用 GPU

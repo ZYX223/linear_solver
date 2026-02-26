@@ -130,7 +130,7 @@ void run_pcg_test(const std::string& name, Backend backend, PreconditionerType p
                   const std::string& output_dir) {
     PCGConfig config;
     config.max_iterations = 1000;
-    config.tolerance = 1e-6;
+    config.tolerance = (P == Precision::Float32) ? 1e-6 : 1e-12;
     config.use_preconditioner = (precond_type != PreconditionerType::NONE);
     config.preconditioner_type = precond_type;
     config.backend = backend;
@@ -162,13 +162,14 @@ void run_amg_test(const std::string& name,
                   const std::vector<typename ScalarType<P>::type>& b, int n,
                   const std::string& output_dir) {
     AMGConfig config;
-    config.max_iterations = 100;
-    config.tolerance = 1e-8;
+    config.max_iterations = 1000;
+    config.tolerance = (P == Precision::Float32) ? 1e-6 : 1e-12;
     config.precision = P;
-    config.max_levels = 10;
-    config.coarse_grid_size = 500;
-    config.pre_smooth_steps = 1;
-    config.post_smooth_steps = 1;
+    // 使用默认参数
+    // config.max_levels = 10;
+    // config.coarse_grid_size = 500;
+    // config.pre_smooth_steps = 1;
+    // config.post_smooth_steps = 1;
 
     using Scalar = typename ScalarType<P>::type;
     std::vector<Scalar> x(n, ScalarConstants<P>::zero());
@@ -194,15 +195,15 @@ void run_pcg_amg_test(const std::string& name, Backend backend,
                       const std::string& output_dir) {
     PCGConfig config;
     config.max_iterations = 1000;
-    config.tolerance = 1e-6;
+    config.tolerance = (P == Precision::Float32) ? 1e-6 : 1e-12;
     config.use_preconditioner = true;
     config.backend = backend;
 
-    // 设置 AMG 预条件子配置
+    // 设置 AMG 预条件子配置（使用默认参数）
     config.amg_config = std::make_shared<AMGConfig>();
-    config.amg_config->max_levels = 10;
-    config.amg_config->coarse_grid_size = 500;
-    config.amg_config->aggregation_eps = 0.001;
+    // config.amg_config->max_levels = 10;
+    // config.amg_config->coarse_grid_size = 500;
+    // config.amg_config->aggregation_eps = 0.001;
 
     // 统一使用 AMG（自动根据后端选择 CPU 或 GPU 实现）
     config.preconditioner_type = PreconditionerType::AMG;

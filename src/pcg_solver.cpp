@@ -65,10 +65,10 @@ SolveStats PCGSolver<P>::solve(const Matrix& A, const Vector& b, Vector& x) {
 // ============================================================================
 // 辅助函数：创建统计信息
 // ============================================================================
-inline SolveStats create_stats(int k, double r1, bool converged, double time) {
+inline SolveStats create_stats(int k, double residual, bool converged, double time) {
     SolveStats stats;
     stats.iterations = k;
-    stats.final_residual = sqrt(r1);
+    stats.final_residual = residual;
     stats.converged = converged;
     stats.solve_time = time;
     return stats;
@@ -165,12 +165,19 @@ SolveStats PCGSolver<P>::solve_core_gpu(
     const double tol = config_.tolerance;
     const int max_iter = config_.max_iterations;
 
+    // 计算 b 的范数平方（用于相对残差）
+    Scalar b_norm_sq = blas_->dot(n, d_r_->d_data, d_r_->d_data);
+    double b_norm = std::sqrt(static_cast<double>(b_norm_sq));
+
     auto start = std::chrono::high_resolution_clock::now();
 
     // 计算初始残差范数平方
-    Scalar r1 = blas_->dot(n, d_r_->d_data, d_r_->d_data);
+    Scalar r1 = b_norm_sq;
 
-    while (r1 > tol * tol && k < max_iter) {
+    // 使用相对残差: ||r|| / ||b|| < tol
+    double tol_threshold = tol * tol * b_norm * b_norm;
+
+    while (static_cast<double>(r1) > tol_threshold && k < max_iter) {
         // 应用预条件子: z = M^(-1) * r
         if (gpu_preconditioner_) {
             gpu_preconditioner_->apply(*d_r_, *d_z_);
@@ -224,8 +231,10 @@ SolveStats PCGSolver<P>::solve_core_gpu(
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecp));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecAp));
 
-    double final_residual = std::sqrt(r1);
-    return create_stats(k, final_residual, r1 <= tol * tol, solve_time);
+    // 返回相对残差 ||r|| / ||b||
+    double final_residual = std::sqrt(static_cast<double>(r1)) / b_norm;
+    bool converged = static_cast<double>(r1) <= tol_threshold;
+    return create_stats(k, final_residual, converged, solve_time);
 }
 
 // ============================================================================
@@ -252,11 +261,19 @@ SolveStats PCGSolver<P>::solve_core_cpu(
     const int max_iter = config_.max_iterations;
 
     r = b;  // 初始残差 r = b
-    Scalar r1 = CPUOps::dot<P>(r, r);
+
+    // 计算 b 的范数（用于相对残差）
+    Scalar b_norm_sq = CPUOps::dot<P>(r, r);
+    double b_norm = std::sqrt(static_cast<double>(b_norm_sq));
+
+    Scalar r1 = b_norm_sq;
+
+    // 使用相对残差: ||r|| / ||b|| < tol
+    double tol_threshold = tol * tol * b_norm * b_norm;
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    while (r1 > tol * tol && k < max_iter) {
+    while (static_cast<double>(r1) > tol_threshold && k < max_iter) {
         // 应用预条件子: z = M^(-1) * r
         if (cpu_preconditioner_) {
             cpu_preconditioner_->apply(r, z);
@@ -303,8 +320,10 @@ SolveStats PCGSolver<P>::solve_core_cpu(
     auto end = std::chrono::high_resolution_clock::now();
     double solve_time = std::chrono::duration<double>(end - start).count();
 
-    double final_residual = std::sqrt(r1);
-    return create_stats(k, final_residual, r1 <= tol * tol, solve_time);
+    // 返回相对残差 ||r|| / ||b||
+    double final_residual = std::sqrt(static_cast<double>(r1)) / b_norm;
+    bool converged = static_cast<double>(r1) <= tol_threshold;
+    return create_stats(k, final_residual, converged, solve_time);
 }
 
 // ============================================================================

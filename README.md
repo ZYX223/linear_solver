@@ -22,29 +22,29 @@ A high-performance linear solver implemented in C++ and NVIDIA CUDA, supporting 
 
 Tested with Poisson matrix (13761x13761, nnz=95065):
 
-### Single Precision (float)
+### Single Precision (tolerance=1e-6)
 
 | Method             | Iterations | Final Residual | Time   |
 |--------------------|------------|----------------|--------|
-| PCG+ILU(0) (CPU)   | 130        | 9.63e-04       | 0.511s |
-| PCG+ILU(0) (GPU)   | 129        | 9.66e-04       | 0.032s |
-| PCG+IC(0) (CPU)    | 144        | 9.84e-04       | 0.407s |
-| PCG+IC(0) (GPU)    | 129        | 9.66e-04       | 0.026s |
-| PCG+AMG (CPU)      | 12         | 7.36e-04       | 0.148s |
-| PCG+AMG (GPU)      | 10         | 6.26e-04       | 0.011s |
-| AMG (CPU)          | 11         | 1.67e-06       | 0.144s |
+| PCG+ILU0 (CPU)     | 112        | 9.30e-07       | 0.479s |
+| PCG+ILU0 (GPU)     | 112        | 9.17e-07       | 0.029s |
+| PCG+IC0 (CPU)      | 123        | 9.24e-07       | 0.348s |
+| PCG+IC0 (GPU)      | 112        | 9.14e-07       | 0.025s |
+| PCG+AMG (CPU)      | 7          | 1.19e-07       | 0.102s |
+| PCG+AMG (GPU)      | 5          | 6.09e-07       | 0.028s |
+| AMG (CPU)          | 4          | 1.43e-06       | 0.107s |
 
-### Double Precision (double)
+### Double Precision (tolerance=1e-12)
 
 | Method             | Iterations | Final Residual | Time   |
 |--------------------|------------|----------------|--------|
-| PCG+ILU(0) (CPU)   | 129        | 9.53e-04       | 0.430s |
-| PCG+ILU(0) (GPU)   | 129        | 9.53e-04       | 0.034s |
-| PCG+IC(0) (CPU)    | 142        | 9.82e-04       | 0.405s |
-| PCG+IC(0) (GPU)    | 129        | 9.53e-04       | 0.028s |
-| PCG+AMG (CPU)      | 12         | 7.36e-04       | 0.151s |
-| PCG+AMG (GPU)      | 10         | 6.26e-04       | 0.011s |
-| AMG (CPU)          | 11         | 2.53e-09       | 0.143s |
+| PCG+ILU0 (CPU)     | 194        | 9.82e-13       | 0.868s |
+| PCG+ILU0 (GPU)     | 194        | 9.76e-13       | 0.047s |
+| PCG+IC0 (CPU)      | 217        | 8.44e-13       | 0.624s |
+| PCG+IC0 (GPU)      | 194        | 9.47e-13       | 0.044s |
+| PCG+AMG (CPU)      | 13         | 3.90e-13       | 0.184s |
+| PCG+AMG (GPU)      | 11         | 3.12e-13       | 0.062s |
+| AMG (CPU)          | 9          | 4.72e-14       | 0.241s |
 
 ## Project Structure
 
@@ -155,13 +155,13 @@ RHS size: 13761
   ------------------------------------------------------------------------------------
   Method                   |   Iters |    Residual |   Time (s) |  Converged |
   ------------------------------------------------------------------------------------
-  PCG+ILU0 (CPU)           |     130 |    9.63e-04 |     0.5114 |        Yes |
-  PCG+ILU0 (GPU)           |     129 |    9.66e-04 |     0.0321 |        Yes |
-  PCG+IC0 (CPU)            |     144 |    9.84e-04 |     0.4068 |        Yes |
-  PCG+IC0 (GPU)            |     129 |    9.66e-04 |     0.0264 |        Yes |
-  PCG+AMG (CPU)            |      12 |    7.36e-04 |     0.1479 |        Yes |
-  PCG+AMG (GPU)            |      10 |    6.26e-04 |     0.0106 |        Yes |
-  AMG (CPU)                |      11 |    1.67e-06 |     0.1444 |        Yes |
+  PCG+ILU0 (CPU)           |     112 |    9.30e-07 |     0.4794 |        Yes |
+  PCG+ILU0 (GPU)           |     112 |    9.17e-07 |     0.0289 |        Yes |
+  PCG+IC0 (CPU)            |     123 |    9.24e-07 |     0.3482 |        Yes |
+  PCG+IC0 (GPU)            |     112 |    9.14e-07 |     0.0248 |        Yes |
+  PCG+AMG (CPU)            |       7 |    1.19e-07 |     0.1021 |        Yes |
+  PCG+AMG (GPU)            |       5 |    6.09e-07 |     0.0278 |        Yes |
+  AMG (CPU)                |       4 |    1.43e-06 |     0.1073 |        Yes |
   ------------------------------------------------------------------------------------
 ```
 
@@ -280,17 +280,17 @@ value2
 // Configure solver
 PCGConfig config;
 config.max_iterations = 1000;
-config.tolerance = 1e-12;
+config.tolerance = 1e-8;
 config.use_preconditioner = true;
 config.preconditioner_type = PreconditionerType::ILU0;  // ILU0, IC0, AMG, NONE
 config.backend = BACKEND_GPU;
-config.precision = Precision::Float32;
+config.precision = Precision::Float64;
 
 // Create solver
-PCGSolver<Precision::Float32> solver(config);
+PCGSolver<Precision::Float64> solver(config);
 
 // Prepare matrix and RHS
-SparseMatrix<Precision::Float32> A(rows, cols, nnz);
+SparseMatrix<Precision::Float64> A(rows, cols, nnz);
 // ... fill matrix data ...
 A.upload_to_gpu();
 
@@ -312,28 +312,21 @@ The AMG solver is based on the [amgcl](https://github.com/ddemidov/amgcl) librar
 
 // Configure solver
 AMGConfig config;
-config.max_iterations = 100;
+config.max_iterations = 1000;
 config.tolerance = 1e-8;
-config.precision = Precision::Float32;
-config.use_pcg = true;               // true: PCG-preconditioned AMG, false: pure V-cycle
-config.coarse_grid_size = 3000;      // Coarse grid size threshold
-config.pre_smooth_steps = 3;         // Pre-smoothing steps
-config.post_smooth_steps = 3;        // Post-smoothing steps
-config.direct_coarse = true;         // Use direct solver on coarse grid
+config.precision = Precision::Float64;
 
 // Create solver (runtime precision selection)
 AMGSolverFloat solver(config);  // or AMGSolverDouble
 
-// Prepare matrix in CSR format
-std::vector<int> row_ptr, col_idx;
-std::vector<float> values;
-// ... fill CSR format matrix data ...
+// Prepare matrix and RHS
+SparseMatrix<Precision::Float64> A(rows, cols, nnz);
 
 std::vector<float> b(n, 1.0f);  // RHS
 std::vector<float> x(n, 0.0f);  // Initial solution
 
 // Solve Ax = b
-SolveStats stats = solver.solve(n, row_ptr, col_idx, values, b, x);
+SolveStats stats = solver.solve(A, b, x);
 ```
 
 ### Type Aliases

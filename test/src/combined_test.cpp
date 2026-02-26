@@ -167,11 +167,17 @@ PreconditionerResult<P> test_pcg_preconditioner(const MMMatrix& mm,
     // PCG 配置
     PCGConfig config;
     config.max_iterations = 1000;
-    config.tolerance = 1e-8;
+    // config.tolerance = 1e-8;
     config.use_preconditioner = true;
     config.backend = use_gpu ? BACKEND_GPU : BACKEND_CPU;
     config.precision = P;
     config.preconditioner_type = prec_type;  // 设置预条件子类型
+
+    if constexpr (std::is_same_v<Scalar, float>) {
+        config.tolerance = 1e-6f;
+    } else {
+        config.tolerance = 1e-12;
+    }
 
     // 配置 AMG 参数（如果使用 AMG 预条件子）
     if (prec_type == PreconditionerType::AMG ) {
@@ -306,7 +312,7 @@ AMGCLResult<Scalar> test_amgcl(const std::vector<int>& row_ptr_int,
     if constexpr (std::is_same_v<Scalar, float>) {
         prm.solver.tol = 1e-6f;
     } else {
-        prm.solver.tol = 1e-8;
+        prm.solver.tol = 1e-12;
     }
     // prm.precond.coarsening.aggr.eps_strong = 0.08f;
     // prm.precond.coarsening.aggr.block_size = 1;
@@ -397,7 +403,7 @@ AMGCLResult<Scalar> test_amgcl_gpu(const std::vector<int>& row_ptr_int,
     if constexpr (std::is_same_v<Scalar, float>) {
         prm.solver.tol = 1e-6f;
     } else {
-        prm.solver.tol = 1e-8;
+        prm.solver.tol = 1e-12;
     }
 
     auto start = chrono::high_resolution_clock::now();
@@ -476,7 +482,7 @@ AMGResult<ScalarT<P>> test_amg(const std::vector<int>& row_ptr,
     if constexpr (std::is_same_v<Scalar, float>) {
         config.tolerance = 1e-6;
     } else {
-        config.tolerance = 1e-8;
+        config.tolerance = 1e-12;
     }
     config.precision = P;
 

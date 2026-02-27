@@ -152,135 +152,114 @@ void GPUILUPreconditioner<P>::apply(const GPUVector<P>& r, GPUVector<P>& z) cons
 
 // ============================================================================
 // GPUIPCPreconditioner 模板实现（不完全 Cholesky 分解）
-// 实现：CPU 分解得到上三角 R + GPU 三角求解
-// 使用 NVIDIA 推荐方式：A ≈ R^T * R，用 TRANSPOSE 操作避免显式构建 R^T
-// 参考：NVIDIA cuSPARSE White Paper "Incomplete-LU and Cholesky Preconditioned Iterative Methods"
+// 实现：CPU 分解 + GPU 三角求解，使用隐式 L^T（TRANSPOSE）
+// 优化：页锁定内存加速数据传输
 // ============================================================================
 
 template<Precision P>
 GPUIPCPreconditioner<P>::GPUIPCPreconditioner(std::shared_ptr<CUSparseWrapper<P>> sparse)
     : sparse_(sparse),
       rows_(0), nnz_(0),
-      d_row_ptr_(nullptr),
-      d_col_ind_(nullptr),
-      d_values_(nullptr),
-      matR_(nullptr),
-      spsvDescrRt_(nullptr), spsvDescrR_(nullptr),
-      d_bufferRt_(nullptr), d_bufferR_(nullptr),
-      bufferSizeRt_(0), bufferSizeR_(0),
-      d_t_(nullptr),
+      h_row_ptr_(nullptr), h_col_ind_(nullptr), h_values_(nullptr),
+      d_row_ptr_(nullptr), d_col_ind_(nullptr), d_values_(nullptr),
+      matL_(nullptr),
+      spsvDescrL_(nullptr), spsvDescrLt_(nullptr),
+      d_bufferL_(nullptr), d_bufferLt_(nullptr),
+      bufferSizeL_(0), bufferSizeLt_(0),
+      d_y_(nullptr),
       is_setup_(false) {
 }
 
 template<Precision P>
 GPUIPCPreconditioner<P>::~GPUIPCPreconditioner() {
+    // 释放页锁定内存
+    if (h_row_ptr_) cudaFreeHost(h_row_ptr_);
+    if (h_col_ind_) cudaFreeHost(h_col_ind_);
+    if (h_values_) cudaFreeHost(h_values_);
+
+    // 释放 GPU 内存
     if (d_row_ptr_) cudaFree(d_row_ptr_);
     if (d_col_ind_) cudaFree(d_col_ind_);
     if (d_values_) cudaFree(d_values_);
-    if (d_bufferRt_) cudaFree(d_bufferRt_);
-    if (d_bufferR_) cudaFree(d_bufferR_);
-    if (d_t_) cudaFree(d_t_);
+    if (d_bufferL_) cudaFree(d_bufferL_);
+    if (d_bufferLt_) cudaFree(d_bufferLt_);
+    if (d_y_) cudaFree(d_y_);
 
-    if (matR_) cusparseDestroySpMat(matR_);
-    if (spsvDescrRt_) cusparseSpSV_destroyDescr(spsvDescrRt_);
-    if (spsvDescrR_) cusparseSpSV_destroyDescr(spsvDescrR_);
+    // 释放 cuSPARSE 资源
+    if (matL_) cusparseDestroySpMat(matL_);
+    if (spsvDescrL_) cusparseSpSV_destroyDescr(spsvDescrL_);
+    if (spsvDescrLt_) cusparseSpSV_destroyDescr(spsvDescrLt_);
 }
 
 template<Precision P>
 void GPUIPCPreconditioner<P>::setup(const SparseMatrix<P>& A) {
     rows_ = A.rows;
 
-
     // ========================================================================
-    // Step 1: 在 CPU 上提取上三角部分并执行 IC(0) 分解
-    // IC(0): A ≈ R^T * R，其中 R 是上三角矩阵
+    // Step 1: 分配页锁定内存（Pinned Memory，加速 H2D 传输）
     // ========================================================================
-    row_ptr_.resize(rows_ + 1, 0);
-
-    // 统计每行上三角元素数量（包括对角线）
+    // 先统计下三角元素数量
+    std::vector<int> tmp_row_ptr(rows_ + 1, 0);
     for (int i = 0; i < rows_; i++) {
         int count = 0;
         for (int j = A.row_ptr[i]; j < A.row_ptr[i + 1]; j++) {
-            if (A.col_ind[j] >= i) count++;  // 上三角：col >= row
+            if (A.col_ind[j] <= i) count++;
         }
-        row_ptr_[i + 1] = row_ptr_[i] + count;
+        tmp_row_ptr[i + 1] = tmp_row_ptr[i] + count;
     }
+    nnz_ = tmp_row_ptr[rows_];
 
-    nnz_ = row_ptr_[rows_];
-    col_ind_.resize(nnz_);
-    values_.resize(nnz_);
+    // 分配页锁定内存
+    CHECK_CUDA(cudaMallocHost(&h_row_ptr_, (rows_ + 1) * sizeof(int)));
+    CHECK_CUDA(cudaMallocHost(&h_col_ind_, nnz_ * sizeof(int)));
+    CHECK_CUDA(cudaMallocHost(&h_values_, nnz_ * sizeof(Scalar)));
 
-    // 填充上三角部分
+    // 复制 row_ptr
+    std::copy(tmp_row_ptr.begin(), tmp_row_ptr.end(), h_row_ptr_);
+
+    // 填充下三角部分
     for (int i = 0; i < rows_; i++) {
-        int idx = row_ptr_[i];
+        int idx = h_row_ptr_[i];
         for (int j = A.row_ptr[i]; j < A.row_ptr[i + 1]; j++) {
-            if (A.col_ind[j] >= i) {
-                col_ind_[idx] = A.col_ind[j];
-                values_[idx] = A.values[j];
+            if (A.col_ind[j] <= i) {
+                h_col_ind_[idx] = A.col_ind[j];
+                h_values_[idx] = A.values[j];
                 idx++;
             }
         }
     }
 
     // ========================================================================
-    // Step 1b: 构建列索引映射（使用 unordered_map 加速 O(1) 查找）
+    // Step 2: 在 CPU 上执行 IC(0) 分解
+    // IC(0): A ≈ L * L^T
     // ========================================================================
+    // 构建列索引映射（加速 O(1) 查找）
     std::vector<std::unordered_map<int, int>> col_map(rows_);
     for (int row = 0; row < rows_; row++) {
-        for (int j = row_ptr_[row]; j < row_ptr_[row + 1]; j++) {
-            col_map[row][col_ind_[j]] = j;
+        for (int j = h_row_ptr_[row]; j < h_row_ptr_[row + 1]; j++) {
+            col_map[row][h_col_ind_[j]] = j;
         }
     }
 
-    // ========================================================================
-    // Step 1c: 构建列到行的反向映射（加速稀疏遍历）
-    // ========================================================================
+    // 构建列到行的反向映射
     std::vector<std::vector<int>> col_rows(rows_);
     for (int k = 0; k < rows_; k++) {
-        for (int j = row_ptr_[k]; j < row_ptr_[k + 1]; j++) {
-            int col = col_ind_[j];
+        for (int j = h_row_ptr_[k]; j < h_row_ptr_[k + 1]; j++) {
+            int col = h_col_ind_[j];
             col_rows[col].push_back(k);
         }
     }
 
-    // IC(0) 分解: A ≈ R^T * R（利用稀疏性优化版本）
+    // IC(0) 分解
     for (int row = 0; row < rows_; row++) {
-        // 找到 R[row,row] 在 values_ 中的索引
         auto it_diag = col_map[row].find(row);
-        if (it_diag == col_map[row].end()) {
-            continue;  // 对角线元素缺失
-        }
+        if (it_diag == col_map[row].end()) continue;
         int diag_idx = it_diag->second;
 
-        // 计算 R[row,row] = sqrt(A[row,row] - sum_{k<row} R[k,row]^2)
-        // 只遍历 R[*,row] 列中实际存在的元素
-        Scalar sum_sq = ScalarConstants<P>::zero();
-        for (int k : col_rows[row]) {
-            if (k < row) {
-                auto it = col_map[k].find(row);
-                if (it != col_map[k].end()) {
-                    Scalar r_k_row = values_[it->second];
-                    sum_sq += r_k_row * r_k_row;
-                }
-            }
-        }
-
-        Scalar diag_val = values_[diag_idx] - sum_sq;
-        if (diag_val > ScalarConstants<P>::zero()) {
-            values_[diag_idx] = std::sqrt(diag_val);
-        } else {
-            values_[diag_idx] = std::sqrt(std::fabs(diag_val) + 1e-12);
-        }
-
-        Scalar r_row_row = values_[diag_idx];
-        if (r_row_row == ScalarConstants<P>::zero()) continue;
-
-        // 计算 R[row,col] = (A[row,col] - sum_{k<row} R[k,row]*R[k,col]) / R[row,row]
-        for (int j_idx = diag_idx + 1; j_idx < row_ptr_[row + 1]; j_idx++) {
-            int col = col_ind_[j_idx];
-
+        // 计算非对角线元素 L[row,col]
+        for (int j_idx = h_row_ptr_[row]; j_idx < diag_idx; j_idx++) {
+            int col = h_col_ind_[j_idx];
             Scalar sum_prod = ScalarConstants<P>::zero();
-            // 双指针遍历求交集（只遍历同时在 row 列和 col 列存在的 k）
             const auto& rows_row = col_rows[row];
             const auto& rows_col = col_rows[col];
 
@@ -288,12 +267,12 @@ void GPUIPCPreconditioner<P>::setup(const SparseMatrix<P>& A) {
             while (i1 < rows_row.size() && i2 < rows_col.size()) {
                 int k1 = rows_row[i1];
                 int k2 = rows_col[i2];
-                if (k1 >= row || k2 >= row) break;
+                if (k1 >= col || k2 >= col) break;
                 if (k1 == k2) {
-                    auto it_row = col_map[k1].find(row);
-                    auto it_col = col_map[k1].find(col);
-                    if (it_row != col_map[k1].end() && it_col != col_map[k1].end()) {
-                        sum_prod += values_[it_row->second] * values_[it_col->second];
+                    auto it_row = col_map[row].find(k1);
+                    auto it_col = col_map[col].find(k1);
+                    if (it_row != col_map[row].end() && it_col != col_map[col].end()) {
+                        sum_prod += h_values_[it_row->second] * h_values_[it_col->second];
                     }
                     i1++; i2++;
                 } else if (k1 < k2) {
@@ -303,48 +282,82 @@ void GPUIPCPreconditioner<P>::setup(const SparseMatrix<P>& A) {
                 }
             }
 
-            values_[j_idx] = (values_[j_idx] - sum_prod) / r_row_row;
+            auto it_col_diag = col_map[col].find(col);
+            if (it_col_diag != col_map[col].end()) {
+                Scalar l_col_col = h_values_[it_col_diag->second];
+                if (l_col_col != ScalarConstants<P>::zero()) {
+                    h_values_[j_idx] = (h_values_[j_idx] - sum_prod) / l_col_col;
+                }
+            }
+        }
+
+        // 计算对角线元素 L[row,row]（带数值稳定性处理）
+        Scalar sum_sq = ScalarConstants<P>::zero();
+        for (int k : col_rows[row]) {
+            if (k < row) {
+                auto it = col_map[row].find(k);
+                if (it != col_map[row].end()) {
+                    Scalar l_row_k = h_values_[it->second];
+                    sum_sq += l_row_k * l_row_k;
+                }
+            }
+        }
+
+        Scalar diag_val = h_values_[diag_idx] - sum_sq;
+        if (diag_val > ScalarConstants<P>::zero()) {
+            h_values_[diag_idx] = std::sqrt(diag_val);
+        } else {
+            // 数值稳定性处理：确保对角线为正
+            h_values_[diag_idx] = std::sqrt(std::fabs(diag_val) + 1e-12);
         }
     }
 
     // ========================================================================
-    // Step 2: 将 R 上传到 GPU
+    // Step 3: 分配 GPU 内存并使用异步拷贝传输数据
     // ========================================================================
     CHECK_CUDA(cudaMalloc(&d_row_ptr_, (rows_ + 1) * sizeof(int)));
     CHECK_CUDA(cudaMalloc(&d_col_ind_, nnz_ * sizeof(int)));
     CHECK_CUDA(cudaMalloc(&d_values_, nnz_ * sizeof(Scalar)));
 
-    CHECK_CUDA(cudaMemcpy(d_row_ptr_, row_ptr_.data(), (rows_ + 1) * sizeof(int),
-                          cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_col_ind_, col_ind_.data(), nnz_ * sizeof(int),
-                          cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_values_, values_.data(), nnz_ * sizeof(Scalar),
-                          cudaMemcpyHostToDevice));
+    // 使用异步拷贝（页锁定内存支持异步传输）
+    cudaStream_t stream;
+    CHECK_CUDA(cudaStreamCreate(&stream));
+
+    CHECK_CUDA(cudaMemcpyAsync(d_row_ptr_, h_row_ptr_, (rows_ + 1) * sizeof(int),
+                               cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(d_col_ind_, h_col_ind_, nnz_ * sizeof(int),
+                               cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(d_values_, h_values_, nnz_ * sizeof(Scalar),
+                               cudaMemcpyHostToDevice, stream));
+
+    // 等待传输完成
+    CHECK_CUDA(cudaStreamSynchronize(stream));
+    CHECK_CUDA(cudaStreamDestroy(stream));
 
     // ========================================================================
-    // Step 3: 创建 R 矩阵描述符（上三角）
+    // Step 4: 创建 L 矩阵描述符（用于三角求解）
     // ========================================================================
-    cusparseFillMode_t fill_upper = CUSPARSE_FILL_MODE_UPPER;
+    cusparseFillMode_t fill_lower = CUSPARSE_FILL_MODE_LOWER;
     cusparseDiagType_t diag_non_unit = CUSPARSE_DIAG_TYPE_NON_UNIT;
 
-    CHECK_CUSPARSE(cusparseCreateCsr(&matR_, rows_, rows_, nnz_,
+    CHECK_CUSPARSE(cusparseCreateCsr(&matL_, rows_, rows_, nnz_,
                                      d_row_ptr_, d_col_ind_, d_values_,
                                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
                                      CUSPARSE_INDEX_BASE_ZERO, CudaDataType<P>::value));
-    CHECK_CUSPARSE(cusparseSpMatSetAttribute(matR_, CUSPARSE_SPMAT_FILL_MODE,
-                                             &fill_upper, sizeof(fill_upper)));
-    CHECK_CUSPARSE(cusparseSpMatSetAttribute(matR_, CUSPARSE_SPMAT_DIAG_TYPE,
+    CHECK_CUSPARSE(cusparseSpMatSetAttribute(matL_, CUSPARSE_SPMAT_FILL_MODE,
+                                             &fill_lower, sizeof(fill_lower)));
+    CHECK_CUSPARSE(cusparseSpMatSetAttribute(matL_, CUSPARSE_SPMAT_DIAG_TYPE,
                                              &diag_non_unit, sizeof(diag_non_unit)));
 
     // ========================================================================
-    // Step 4: 创建三角求解描述符
-    // R^T 求解（TRANSPOSE，相当于下三角）和 R 求解（NON_TRANSPOSE，上三角）
+    // Step 5: 创建三角求解描述符
+    // L 求解用 NON_TRANSPOSE，L^T 求解用 TRANSPOSE（隐式转置，节省内存）
     // ========================================================================
-    CHECK_CUSPARSE(cusparseSpSV_createDescr(&spsvDescrRt_));
-    CHECK_CUSPARSE(cusparseSpSV_createDescr(&spsvDescrR_));
+    CHECK_CUSPARSE(cusparseSpSV_createDescr(&spsvDescrL_));
+    CHECK_CUSPARSE(cusparseSpSV_createDescr(&spsvDescrLt_));
 
     // 分配辅助向量
-    CHECK_CUDA(cudaMalloc(&d_t_, rows_ * sizeof(Scalar)));
+    CHECK_CUDA(cudaMalloc(&d_y_, rows_ * sizeof(Scalar)));
 
     // 分析三角求解
     GPUVector<P> dummy_r(rows_);
@@ -352,13 +365,15 @@ void GPUIPCPreconditioner<P>::setup(const SparseMatrix<P>& A) {
     auto vecR = dummy_r.create_dnvec_descr();
     auto vecX = dummy_x.create_dnvec_descr();
 
-    // R^T 求解分析（使用 TRANSPOSE 操作）
-    sparse_->triangular_solve_setup(matR_, spsvDescrRt_, vecR, vecX,
-                                    &d_bufferRt_, &bufferSizeRt_, CUSPARSE_OPERATION_TRANSPOSE);
+    // L 求解分析（NON_TRANSPOSE）
+    sparse_->triangular_solve_setup(matL_, spsvDescrL_, vecR, vecX,
+                                    &d_bufferL_, &bufferSizeL_,
+                                    CUSPARSE_OPERATION_NON_TRANSPOSE);
 
-    // R 求解分析（使用 NON_TRANSPOSE 操作）
-    sparse_->triangular_solve_setup(matR_, spsvDescrR_, vecR, vecX,
-                                    &d_bufferR_, &bufferSizeR_);
+    // L^T 求解分析（TRANSPOSE）
+    sparse_->triangular_solve_setup(matL_, spsvDescrLt_, vecR, vecX,
+                                    &d_bufferLt_, &bufferSizeLt_,
+                                    CUSPARSE_OPERATION_TRANSPOSE);
 
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecR));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecX));
@@ -374,19 +389,21 @@ void GPUIPCPreconditioner<P>::apply(const GPUVector<P>& r, GPUVector<P>& z) cons
     }
 
     auto vecR = r.create_dnvec_descr();
-    auto vecT = cusparseDnVecDescr_t();
+    auto vecY = cusparseDnVecDescr_t();
     auto vecZ = z.create_dnvec_descr();
 
-    CHECK_CUSPARSE(cusparseCreateDnVec(&vecT, rows_, d_t_, CudaDataType<P>::value));
+    CHECK_CUSPARSE(cusparseCreateDnVec(&vecY, rows_, d_y_, CudaDataType<P>::value));
 
-    // Step 1: R^T * t = r （使用 TRANSPOSE 操作，相当于下三角求解）
-    sparse_->triangular_solve(matR_, spsvDescrRt_, vecR, vecT, CUSPARSE_OPERATION_TRANSPOSE);
+    // Step 1: L * y = r （下三角求解）
+    sparse_->triangular_solve(matL_, spsvDescrL_, vecR, vecY,
+                              CUSPARSE_OPERATION_NON_TRANSPOSE);
 
-    // Step 2: R * z = t （使用 NON_TRANSPOSE 操作，上三角求解）
-    sparse_->triangular_solve(matR_, spsvDescrR_, vecT, vecZ);
+    // Step 2: L^T * z = y （隐式转置求解）
+    sparse_->triangular_solve(matL_, spsvDescrLt_, vecY, vecZ,
+                              CUSPARSE_OPERATION_TRANSPOSE);
 
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecR));
-    CHECK_CUSPARSE(cusparseDestroyDnVec(vecT));
+    CHECK_CUSPARSE(cusparseDestroyDnVec(vecY));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecZ));
 }
 

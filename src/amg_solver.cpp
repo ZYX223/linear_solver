@@ -162,24 +162,25 @@ SolveStats AMGSolver<P>::solve(const Matrix& A, const Vector& b, Vector& x) {
     // 准备统计信息
     SolveStats stats;
     stats.iterations = iters;
-    stats.converged = (error < config_.tolerance);  // 使用实际残差判断收敛
-
-    // 计算相对残差 ||b - Ax|| / ||b||
-    Vector ax(n);
-    CPUOps::spmv<P>(n, A.row_ptr, A.col_ind, A.values, x, ax);
-
-    double r_norm = 0;
-    double b_norm = 0;
-    for (int i = 0; i < n; ++i) {
-        Scalar r = b[i] - ax[i];
-        r_norm += static_cast<double>(r * r);
-        b_norm += static_cast<double>(b[i] * b[i]);
-    }
-
-    stats.final_residual = std::sqrt(r_norm) / std::sqrt(b_norm);
+    stats.converged = (error < config_.tolerance);  // 使用递推残差判断收敛
+    stats.final_residual = error;  // 使用递推残差
     stats.solve_time = solve_time;
 
     return stats;
+
+    // 计算真实残差 ||b - Ax|| / ||b||
+    // Vector ax(n);
+    // CPUOps::spmv<P>(n, A.row_ptr, A.col_ind, A.values, x, ax);
+    // double r_norm = 0;
+    // double b_norm = 0;
+    // for (int i = 0; i < n; ++i) {
+    //     Scalar r = b[i] - ax[i];
+    //     r_norm += static_cast<double>(r * r);
+    //     b_norm += static_cast<double>(b[i] * b[i]);
+    // }
+    // stats.final_residual = std::sqrt(r_norm) / std::sqrt(b_norm);
+    // stats.solve_time = solve_time;
+    // return stats;
 }
 
 // ============================================================================

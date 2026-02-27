@@ -102,8 +102,6 @@ private:
 
 // ============================================================================
 // GPU IC(0) 预处理器（不完全 Cholesky 分解）
-// 实现：CPU 分解得到上三角 R + GPU 三角求解
-// 使用 NVIDIA 推荐方式：R^T * R 分解，用 TRANSPOSE 操作避免显式构建 R^T
 // ============================================================================
 
 template<Precision P>
@@ -123,31 +121,31 @@ private:
     std::shared_ptr<CUSparseWrapper<P>> sparse_;
 
     int rows_;
-    int nnz_;
+    int nnz_;   // 下三角 L 的非零元素数
 
-    // 上三角 R 因子（CSR 格式，CPU 端用于分解）
-    std::vector<int> row_ptr_;
-    std::vector<int> col_ind_;
-    std::vector<Scalar> values_;
+    // CPU 端数据（用于 IC(0) 分解，使用页锁定内存加速传输）
+    int* h_row_ptr_;      // 页锁定内存
+    int* h_col_ind_;      // 页锁定内存
+    Scalar* h_values_;    // 页锁定内存
 
-    // GPU 端数据（只有一个 R 矩阵）
+    // GPU 端数据
     int* d_row_ptr_;
     int* d_col_ind_;
     Scalar* d_values_;
 
-    // R 矩阵描述符（用于 R^T 和 R 的三角求解）
-    cusparseSpMatDescr_t matR_;
+    // 矩阵描述符（用于三角求解）
+    cusparseSpMatDescr_t matL_;   // 下三角 L
 
     // 三角求解描述符和 buffer
-    cusparseSpSVDescr_t spsvDescrRt_;  // R^T 求解（TRANSPOSE）
-    cusparseSpSVDescr_t spsvDescrR_;   // R 求解（NON_TRANSPOSE）
-    void* d_bufferRt_;
-    void* d_bufferR_;
-    size_t bufferSizeRt_;
-    size_t bufferSizeR_;
+    cusparseSpSVDescr_t spsvDescrL_;    // L 求解 (NON_TRANSPOSE)
+    cusparseSpSVDescr_t spsvDescrLt_;   // L^T 求解 (TRANSPOSE)
+    void* d_bufferL_;
+    void* d_bufferLt_;
+    size_t bufferSizeL_;
+    size_t bufferSizeLt_;
 
     // 辅助向量
-    Scalar* d_t_;
+    Scalar* d_y_;
 
     bool is_setup_;
 };

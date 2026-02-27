@@ -161,13 +161,6 @@ for mtx_file in $MATRIX_FILES; do
         # 提取 double 结果
         extract_results "$(sed -n '/double 精度/,$ p' "$output_file")" \
             "$matrix_name" "$rows" "$nnz" "$symmetric" "double" >> "$CSV_FILE"
-
-        # 显示简要结果
-        echo "" >> "$REPORT_FILE"
-        grep -E "^\s*(PCG\+ILU|PCG\+IC|PCG\+AMG|AMG|amgcl)" "$output_file" | head -10 | while read line; do
-            echo "  $line"
-        done
-        echo "" >> "$REPORT_FILE"
     else
         end_time=$(date +%s.%N)
         elapsed=$(echo "$end_time - $start_time" | bc)

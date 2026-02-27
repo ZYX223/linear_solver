@@ -27,25 +27,25 @@
 
 | 方法              | 迭代次数 | 最终残差  | 求解时间 |
 |-------------------|----------|-----------|----------|
-| PCG+ILU0 (CPU)    | 112      | 9.30e-07  | 0.479s   |
-| PCG+ILU0 (GPU)    | 112      | 9.17e-07  | 0.029s   |
+| PCG+ILU0 (CPU)    | 112      | 9.30e-07  | 0.478s   |
+| PCG+ILU0 (GPU)    | 112      | 9.17e-07  | 0.028s   |
 | PCG+IC0 (CPU)     | 123      | 9.24e-07  | 0.348s   |
-| PCG+IC0 (GPU)     | 112      | 9.14e-07  | 0.025s   |
-| PCG+AMG (CPU)     | 7        | 1.19e-07  | 0.102s   |
+| PCG+IC0 (GPU)     | 123      | 9.22e-07  | 0.025s   |
+| PCG+AMG (CPU)     | 7        | 1.19e-07  | 0.099s   |
 | PCG+AMG (GPU)     | 5        | 6.09e-07  | 0.028s   |
-| AMG (CPU)         | 4        | 1.43e-06  | 0.107s   |
+| AMG (CPU)         | 4        | 4.86e-07  | 0.108s   |
 
 ### 双精度 (容差=1e-12)
 
 | 方法              | 迭代次数 | 最终残差  | 求解时间 |
 |-------------------|----------|-----------|----------|
-| PCG+ILU0 (CPU)    | 194      | 9.82e-13  | 0.868s   |
-| PCG+ILU0 (GPU)    | 194      | 9.76e-13  | 0.047s   |
-| PCG+IC0 (CPU)     | 217      | 8.44e-13  | 0.624s   |
-| PCG+IC0 (GPU)     | 194      | 9.47e-13  | 0.044s   |
-| PCG+AMG (CPU)     | 13       | 3.90e-13  | 0.184s   |
+| PCG+ILU0 (CPU)    | 194      | 9.82e-13  | 0.809s   |
+| PCG+ILU0 (GPU)    | 194      | 9.76e-13  | 0.046s   |
+| PCG+IC0 (CPU)     | 217      | 8.44e-13  | 0.618s   |
+| PCG+IC0 (GPU)     | 217      | 8.44e-13  | 0.045s   |
+| PCG+AMG (CPU)     | 13       | 3.90e-13  | 0.186s   |
 | PCG+AMG (GPU)     | 11       | 3.12e-13  | 0.062s   |
-| AMG (CPU)         | 9        | 4.72e-14  | 0.241s   |
+| AMG (CPU)         | 9        | 4.70e-14  | 0.242s   |
 
 
 
@@ -159,13 +159,13 @@ cd examples
   ------------------------------------------------------------------------------------
   Method                   |   Iters |    Residual |   Time (s) |  Converged |
   ------------------------------------------------------------------------------------
-  PCG+ILU0 (CPU)           |     112 |    9.30e-07 |     0.4794 |        Yes |
-  PCG+ILU0 (GPU)           |     112 |    9.17e-07 |     0.0289 |        Yes |
-  PCG+IC0 (CPU)            |     123 |    9.24e-07 |     0.3482 |        Yes |
-  PCG+IC0 (GPU)            |     112 |    9.14e-07 |     0.0248 |        Yes |
-  PCG+AMG (CPU)            |       7 |    1.19e-07 |     0.1021 |        Yes |
-  PCG+AMG (GPU)            |       5 |    6.09e-07 |     0.0278 |        Yes |
-  AMG (CPU)                |       4 |    1.43e-06 |     0.1073 |        Yes |
+  PCG+ILU0 (CPU)           |     112 |    9.30e-07 |     0.4781 |        Yes |
+  PCG+ILU0 (GPU)           |     112 |    9.17e-07 |     0.0283 |        Yes |
+  PCG+IC0 (CPU)            |     123 |    9.24e-07 |     0.3480 |        Yes |
+  PCG+IC0 (GPU)            |     123 |    9.22e-07 |     0.0248 |        Yes |
+  PCG+AMG (CPU)            |       7 |    1.19e-07 |     0.0990 |        Yes |
+  PCG+AMG (GPU)            |       5 |    6.09e-07 |     0.0282 |        Yes |
+  AMG (CPU)                |       4 |    4.86e-07 |     0.1077 |        Yes |
   ------------------------------------------------------------------------------------
 ```
 
@@ -303,8 +303,8 @@ SparseMatrix<Precision::Float64> A(rows, cols, nnz);
 // ... 填充矩阵数据 ...
 A.upload_to_gpu();
 
-std::vector<float> b(n, 1.0f);  // 右端项
-std::vector<float> x(n, 0.0f);  // 初始解
+std::vector<double> b(n, 1.0f);  // 右端项
+std::vector<double> x(n, 0.0f);  // 初始解
 
 // 求解 Ax = b
 SolveStats stats = solver.solve(A, b, x);
@@ -331,8 +331,8 @@ AMGSolverFloat solver(config);  // 或 AMGSolverDouble
 // 准备矩阵和右端项
 SparseMatrix<Precision::Float64> A(rows, cols, nnz);
 
-std::vector<float> b(n, 1.0f);  // 右端项
-std::vector<float> x(n, 0.0f);  // 初始解
+std::vector<double> b(n, 1.0f);  // 右端项
+std::vector<double> x(n, 0.0f);  // 初始解
 
 // 求解 Ax = b
 SolveStats stats = solver.solve(A, b, x);

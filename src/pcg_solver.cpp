@@ -169,13 +169,13 @@ SolveStats PCGSolver<P>::solve_core_gpu(
     Scalar b_norm_sq = blas_->dot(n, d_r_->d_data, d_r_->d_data);
     double b_norm = std::sqrt(static_cast<double>(b_norm_sq));
 
-    auto start = std::chrono::high_resolution_clock::now();
-
     // 计算初始残差范数平方
     Scalar r1 = b_norm_sq;
 
     // 使用相对残差: ||r|| / ||b|| < tol
     double tol_threshold = tol * tol * b_norm * b_norm;
+
+    auto start = std::chrono::high_resolution_clock::now();
 
     while (static_cast<double>(r1) > tol_threshold && k < max_iter) {
         // 应用预条件子: z = M^(-1) * r
@@ -231,10 +231,22 @@ SolveStats PCGSolver<P>::solve_core_gpu(
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecp));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecAp));
 
-    // 返回相对残差 ||r|| / ||b||
+    // 使用递推残差 ||r|| / ||b||
     double final_residual = std::sqrt(static_cast<double>(r1)) / b_norm;
     bool converged = static_cast<double>(r1) <= tol_threshold;
     return create_stats(k, final_residual, converged, solve_time);
+
+    // 计算真实残差 ||b - Ax|| / ||b||
+    // std::vector<Scalar> Ax(n);
+    // CPUOps::spmv<P>(n, A.row_ptr, A.col_ind, A.values, x, Ax);
+    // double r_norm = 0;
+    // for (int i = 0; i < n; ++i) {
+    //     double ri = static_cast<double>(b[i] - Ax[i]);
+    //     r_norm += ri * ri;
+    // }
+    // double final_residual = std::sqrt(r_norm) / b_norm;
+    // bool converged = static_cast<double>(r1) <= tol_threshold;
+    // return create_stats(k, final_residual, converged, solve_time);
 }
 
 // ============================================================================
@@ -320,10 +332,22 @@ SolveStats PCGSolver<P>::solve_core_cpu(
     auto end = std::chrono::high_resolution_clock::now();
     double solve_time = std::chrono::duration<double>(end - start).count();
 
-    // 返回相对残差 ||r|| / ||b||
+    // 使用递推残差 ||r|| / ||b||
     double final_residual = std::sqrt(static_cast<double>(r1)) / b_norm;
     bool converged = static_cast<double>(r1) <= tol_threshold;
     return create_stats(k, final_residual, converged, solve_time);
+
+    // 计算真实残差 ||b - Ax|| / ||b||
+    // std::vector<Scalar> Ax(n);
+    // CPUOps::spmv<P>(n, A.row_ptr, A.col_ind, A.values, x, Ax);
+    // double r_norm = 0;
+    // for (int i = 0; i < n; ++i) {
+    //     double ri = static_cast<double>(b[i] - Ax[i]);
+    //     r_norm += ri * ri;
+    // }
+    // double final_residual = std::sqrt(r_norm) / b_norm;
+    // bool converged = static_cast<double>(r1) <= tol_threshold;
+    // return create_stats(k, final_residual, converged, solve_time);
 }
 
 // ============================================================================

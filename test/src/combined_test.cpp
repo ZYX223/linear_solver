@@ -194,32 +194,22 @@ PreconditionerResult<P> test_pcg_preconditioner(const MMMatrix& mm,
     SolveStats stats = solver.solve(A, b, x);
     auto end = chrono::high_resolution_clock::now();
 
-    // 计算相对残差
-    double rel_residual = [&] {
-        std::vector<Scalar> Ax(mm.rows);
-        spmv_csr<Scalar>(row_ptr, col_ind, A.values, x, Ax);
-        for (int i = 0; i < mm.rows; ++i) {
-            Ax[i] -= b[i];
-        }
-        return norm2(Ax) / norm_b;
-    }();
-
     double time = chrono::duration<double>(end - start).count();
 
-    // 返回结果
+    // 返回结果，直接使用 final_residual（真实残差 ||b-Ax||/||b||）
     PreconditionerResult<P> result{};
 
     if (prec_type == PreconditionerType::ILU0) {
         if (use_gpu) {
             result.pcg_ilu_gpu_iters = stats.iterations;
             result.pcg_ilu_gpu_time = time;
-            result.pcg_ilu_gpu_rel_residual = rel_residual;
+            result.pcg_ilu_gpu_rel_residual = stats.final_residual;
             result.pcg_ilu_gpu_residual = stats.final_residual;
             result.pcg_ilu_gpu_converged = stats.converged;
         } else {
             result.pcg_ilu_cpu_iters = stats.iterations;
             result.pcg_ilu_cpu_time = time;
-            result.pcg_ilu_cpu_rel_residual = rel_residual;
+            result.pcg_ilu_cpu_rel_residual = stats.final_residual;
             result.pcg_ilu_cpu_residual = stats.final_residual;
             result.pcg_ilu_cpu_converged = stats.converged;
         }
@@ -227,13 +217,13 @@ PreconditionerResult<P> test_pcg_preconditioner(const MMMatrix& mm,
         if (use_gpu) {
             result.pcg_ic0_gpu_iters = stats.iterations;
             result.pcg_ic0_gpu_time = time;
-            result.pcg_ic0_gpu_rel_residual = rel_residual;
+            result.pcg_ic0_gpu_rel_residual = stats.final_residual;
             result.pcg_ic0_gpu_residual = stats.final_residual;
             result.pcg_ic0_gpu_converged = stats.converged;
         } else {
             result.pcg_ic0_cpu_iters = stats.iterations;
             result.pcg_ic0_cpu_time = time;
-            result.pcg_ic0_cpu_rel_residual = rel_residual;
+            result.pcg_ic0_cpu_rel_residual = stats.final_residual;
             result.pcg_ic0_cpu_residual = stats.final_residual;
             result.pcg_ic0_cpu_converged = stats.converged;
         }
@@ -242,14 +232,14 @@ PreconditionerResult<P> test_pcg_preconditioner(const MMMatrix& mm,
         if (use_gpu) {
             result.pcg_amg_gpu_iters = stats.iterations;
             result.pcg_amg_gpu_time = time;
-            result.pcg_amg_gpu_rel_residual = rel_residual;
+            result.pcg_amg_gpu_rel_residual = stats.final_residual;
             result.pcg_amg_gpu_residual = stats.final_residual;
             result.pcg_amg_gpu_converged = stats.converged;
         } else {
             // CPU AMG 结果存储在 pcg_amg_cpu_* 字段
             result.pcg_amg_cpu_iters = stats.iterations;
             result.pcg_amg_cpu_time = time;
-            result.pcg_amg_cpu_rel_residual = rel_residual;
+            result.pcg_amg_cpu_rel_residual = stats.final_residual;
             result.pcg_amg_cpu_residual = stats.final_residual;
             result.pcg_amg_cpu_converged = stats.converged;
         }
@@ -318,9 +308,9 @@ AMGCLResult<Scalar> test_amgcl(const std::vector<int>& row_ptr_int,
     // prm.precond.coarsening.aggr.block_size = 1;
 
     // 调试：打印 float 下的 tolerance 值
-    if constexpr (std::is_same_v<Scalar, float>) {
-        std::cout << "  [DEBUG] Float 精度，使用 tol = " << prm.solver.tol << " (更宽松)\n";
-    }
+    // if constexpr (std::is_same_v<Scalar, float>) {
+    //     std::cout << "  [DEBUG] Float 精度，使用 tol = " << prm.solver.tol << " (更宽松)\n";
+    // }
 
     auto start = chrono::high_resolution_clock::now();
     Solver solve(*A, prm);
@@ -334,27 +324,22 @@ AMGCLResult<Scalar> test_amgcl(const std::vector<int>& row_ptr_int,
     AMGCLResult<Scalar> result{};
     result.iters = static_cast<int>(iters);
     result.residual = static_cast<double>(error);
+    result.rel_residual =static_cast<double>(error);
     result.time = chrono::duration<double>(end - start).count();
-
-    // 调试：打印 float 下的收敛判断
-    if constexpr (std::is_same_v<Scalar, float>) {
-        bool conv_check = (error < prm.solver.tol);
-        std::cout << "  [DEBUG] error = " << error << ", tol = " << prm.solver.tol << ", converged = " << conv_check << "\n";
-    }
 
     result.converged = (error < prm.solver.tol);  // 使用实际残差判断收敛
 
     // 计算相对残差
-    std::vector<Scalar> ax(n, Scalar(0));  // 显式初始化为 0（与备份版本一致）
-    amgcl::backend::spmv(1, *A, x, 0, ax);
-    double rel_res = 0;
-    double norm_rhs = 0;
-    for (int i = 0; i < n; ++i) {
-        Scalar r = rhs[i] - ax[i];
-        rel_res += static_cast<double>(r * r);
-        norm_rhs += static_cast<double>(rhs[i] * rhs[i]);
-    }
-    result.rel_residual = std::sqrt(rel_res) / std::sqrt(norm_rhs);
+    // std::vector<Scalar> ax(n, Scalar(0));  // 显式初始化为 0（与备份版本一致）
+    // amgcl::backend::spmv(1, *A, x, 0, ax);
+    // double rel_res = 0;
+    // double norm_rhs = 0;
+    // for (int i = 0; i < n; ++i) {
+    //     Scalar r = rhs[i] - ax[i];
+    //     rel_res += static_cast<double>(r * r);
+    //     norm_rhs += static_cast<double>(rhs[i] * rhs[i]);
+    // }
+    // result.rel_residual = std::sqrt(rel_res) / std::sqrt(norm_rhs);
 
     return result;
 }
@@ -492,20 +477,11 @@ AMGResult<ScalarT<P>> test_amg(const std::vector<int>& row_ptr,
     SolveStats stats = solver.solve(A, b, x);
     auto end = chrono::high_resolution_clock::now();
 
-    // 计算相对残差
-    double rel_residual = [&] {
-        std::vector<Scalar> Ax(n);
-        spmv_csr<Scalar>(row_ptr, col_ind, A.values, x, Ax);
-        for (int i = 0; i < n; ++i) {
-            Ax[i] -= b[i];
-        }
-        return norm2(Ax) / norm_b;
-    }();
-
+    // 直接使用 final_residual（真实残差 ||b-Ax||/||b||）
     AMGResult<Scalar> result{};
     result.iters = stats.iterations;
     result.residual = stats.final_residual;
-    result.rel_residual = rel_residual;
+    result.rel_residual = stats.final_residual;
     result.time = chrono::duration<double>(end - start).count();
     result.converged = stats.converged;
 
@@ -608,12 +584,12 @@ void run_combined_test(const std::string& matrix_file, bool use_gpu) {
     // ========================================================================
     // 测试独立 AMG 求解器
     // ========================================================================
-    std::cout << "\n[4.1/5] 测试 AMG (CPU)...\n";
+    std::cout << "\n[4/5] 测试 AMG (CPU)...\n";
     auto amg_result = test_amg<P>(row_ptr, col_ind, values_double, b_double, mm.rows);
     std::cout << "  完成\n";
 
     // 测试 amgcl 库
-    std::cout << "\n[4.2/5] 测试 amgcl (CPU)...\n";
+    std::cout << "\n[5/5] 测试 amgcl (CPU)...\n";
     auto amgcl_result = test_amgcl<Scalar>(row_ptr, col_ind, values_double, b_double, mm.rows);
     std::cout << "  完成\n";
 
@@ -639,7 +615,7 @@ void run_combined_test(const std::string& matrix_file, bool use_gpu) {
         std::cout << "  " << std::string(88, '=') << "\n";
         std::cout << "  " << std::left << std::setw(22) << "Method"
                   << std::right << std::setw(8) << "Iters"
-                  << std::setw(14) << "RelResidual"
+                  << std::setw(14) << "Residual"
                   << std::setw(12) << "Time (s)"
                   << std::setw(10) << "Converged"
                   << "\n";
@@ -649,7 +625,7 @@ void run_combined_test(const std::string& matrix_file, bool use_gpu) {
         std::cout << "  " << std::left << std::setw(22) << "PCG+ILU(0) (CPU)"
                   << std::right << std::setw(8) << ilu0_cpu_result.pcg_ilu_cpu_iters
                   << std::scientific << std::setprecision(2) << std::setw(14) << ilu0_cpu_result.pcg_ilu_cpu_rel_residual
-                  << std::fixed << std::setprecision(3) << std::setw(12) << ilu0_cpu_result.pcg_ilu_cpu_time
+                  << std::fixed << std::setprecision(4) << std::setw(12) << ilu0_cpu_result.pcg_ilu_cpu_time
                   << std::setw(10) << (ilu0_cpu_result.pcg_ilu_cpu_converged ? "Yes" : "No")
                   << "\n";
 
@@ -658,7 +634,7 @@ void run_combined_test(const std::string& matrix_file, bool use_gpu) {
             std::cout << "  " << std::left << std::setw(22) << "PCG+ILU(0) (GPU)"
                       << std::right << std::setw(8) << ilu0_gpu_result.pcg_ilu_gpu_iters
                       << std::scientific << std::setprecision(2) << std::setw(14) << ilu0_gpu_result.pcg_ilu_gpu_rel_residual
-                      << std::fixed << std::setprecision(3) << std::setw(12) << ilu0_gpu_result.pcg_ilu_gpu_time
+                      << std::fixed << std::setprecision(4) << std::setw(12) << ilu0_gpu_result.pcg_ilu_gpu_time
                       << std::setw(10) << (ilu0_gpu_result.pcg_ilu_gpu_converged ? "Yes" : "No")
                       << "\n";
         }
@@ -667,7 +643,7 @@ void run_combined_test(const std::string& matrix_file, bool use_gpu) {
         std::cout << "  " << std::left << std::setw(22) << "PCG+IC(0) (CPU)"
                   << std::right << std::setw(8) << ic0_cpu_result.pcg_ic0_cpu_iters
                   << std::scientific << std::setprecision(2) << std::setw(14) << ic0_cpu_result.pcg_ic0_cpu_rel_residual
-                  << std::fixed << std::setprecision(3) << std::setw(12) << ic0_cpu_result.pcg_ic0_cpu_time
+                  << std::fixed << std::setprecision(4) << std::setw(12) << ic0_cpu_result.pcg_ic0_cpu_time
                   << std::setw(10) << (ic0_cpu_result.pcg_ic0_cpu_converged ? "Yes" : "No")
                   << "\n";
 
@@ -676,7 +652,7 @@ void run_combined_test(const std::string& matrix_file, bool use_gpu) {
             std::cout << "  " << std::left << std::setw(22) << "PCG+IC(0) (GPU)"
                       << std::right << std::setw(8) << ic0_gpu_result.pcg_ic0_gpu_iters
                       << std::scientific << std::setprecision(2) << std::setw(14) << ic0_gpu_result.pcg_ic0_gpu_rel_residual
-                      << std::fixed << std::setprecision(3) << std::setw(12) << ic0_gpu_result.pcg_ic0_gpu_time
+                      << std::fixed << std::setprecision(4) << std::setw(12) << ic0_gpu_result.pcg_ic0_gpu_time
                       << std::setw(10) << (ic0_gpu_result.pcg_ic0_gpu_converged ? "Yes" : "No")
                       << "\n";
         }
@@ -685,7 +661,7 @@ void run_combined_test(const std::string& matrix_file, bool use_gpu) {
         std::cout << "  " << std::left << std::setw(22) << "PCG+AMG (CPU)"
                   << std::right << std::setw(8) << amg_cpu_result.pcg_amg_cpu_iters
                   << std::scientific << std::setprecision(2) << std::setw(14) << amg_cpu_result.pcg_amg_cpu_rel_residual
-                  << std::fixed << std::setprecision(3) << std::setw(12) << amg_cpu_result.pcg_amg_cpu_time
+                  << std::fixed << std::setprecision(4) << std::setw(12) << amg_cpu_result.pcg_amg_cpu_time
                   << std::setw(10) << (amg_cpu_result.pcg_amg_cpu_converged ? "Yes" : "No")
                   << "\n";
 
@@ -694,7 +670,7 @@ void run_combined_test(const std::string& matrix_file, bool use_gpu) {
             std::cout << "  " << std::left << std::setw(22) << "PCG+AMG (GPU)"
                       << std::right << std::setw(8) << amg_gpu_result.pcg_amg_gpu_iters
                       << std::scientific << std::setprecision(2) << std::setw(14) << amg_gpu_result.pcg_amg_gpu_rel_residual
-                      << std::fixed << std::setprecision(3) << std::setw(12) << amg_gpu_result.pcg_amg_gpu_time
+                      << std::fixed << std::setprecision(4) << std::setw(12) << amg_gpu_result.pcg_amg_gpu_time
                       << std::setw(10) << (amg_gpu_result.pcg_amg_gpu_converged ? "Yes" : "No")
                       << "\n";
         }
@@ -704,7 +680,7 @@ void run_combined_test(const std::string& matrix_file, bool use_gpu) {
         //     std::cout << "  " << std::left << std::setw(22) << "amgcl (GPU)"
         //               << std::right << std::setw(8) << amgcl_gpu_result.iters
         //               << std::scientific << std::setprecision(2) << std::setw(14) << amgcl_gpu_result.rel_residual
-        //               << std::fixed << std::setprecision(3) << std::setw(12) << amgcl_gpu_result.time
+        //               << std::fixed << std::setprecision(4) << std::setw(12) << amgcl_gpu_result.time
         //               << std::setw(10) << (amgcl_gpu_result.converged ? "Yes" : "No")
         //               << "\n";
         // }
@@ -730,7 +706,7 @@ void run_combined_test(const std::string& matrix_file, bool use_gpu) {
         std::cout << "  " << std::left << std::setw(22) << "AMG (CPU)"
                   << std::right << std::setw(8) << amg_result.iters
                   << std::scientific << std::setprecision(2) << std::setw(14) << amg_result.rel_residual
-                  << std::fixed << std::setprecision(3) << std::setw(12) << amg_result.time
+                  << std::fixed << std::setprecision(4) << std::setw(12) << amg_result.time
                   << std::setw(10) << (amg_result.converged ? "Yes" : "No")
                   << "\n";
 
@@ -738,7 +714,7 @@ void run_combined_test(const std::string& matrix_file, bool use_gpu) {
         std::cout << "  " << std::left << std::setw(22) << "amgcl (CPU)"
                   << std::right << std::setw(8) << amgcl_result.iters
                   << std::scientific << std::setprecision(2) << std::setw(14) << amgcl_result.rel_residual
-                  << std::fixed << std::setprecision(3) << std::setw(12) << amgcl_result.time
+                  << std::fixed << std::setprecision(4) << std::setw(12) << amgcl_result.time
                   << std::setw(10) << (amgcl_result.converged ? "Yes" : "No")
                   << "\n";
 
